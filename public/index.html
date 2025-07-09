@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Customer Video Stream</title>
+</head>
+<body>
+  <h1>Live Stream Viewer</h1>
+  <form id="streamForm">
+    <label for="customerId">Customer ID:</label>
+    <input type="text" id="customerId" name="customerId" required>
+    <button type="submit">View Stream</button>
+  </form>
+  <hr>
+  <img id="stream" style="max-width:100%; border:1px solid #333;" />
+  <script>
+    document.getElementById('streamForm').onsubmit = function(e) {
+      e.preventDefault();
+      const customerId = document.getElementById('customerId').value;
+      document.getElementById('stream').src = `/api/stream/${customerId}`;
+    };
+  </script>
+</body>
+</html> 

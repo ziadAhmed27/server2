@@ -1,3 +1,18 @@
+# Ignore uploaded images
+uploads/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore processed images
+*.jpg
+*.jpeg
+*.png
+
+# Ignore environment files
+.env
+
 # Node.js dependencies
 node_modules/
 
@@ -14,9 +29,6 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
-
-# Env files
-.env
 
 # Misc
 *.swp 

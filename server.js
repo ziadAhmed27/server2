@@ -1,10 +1,8 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const path = require('path');
 const { initDb } = require('./database');
 const customerRoutes = require('./routes/customers');
-const streamRoutes = require('./routes/stream');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,10 +16,6 @@ initDb();
 
 // Routes
 app.use('/api/customers', customerRoutes);
-app.use('/api/stream', streamRoutes);
-
-// Serve static files (for video stream viewing)
-app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/', (req, res) => {
   res.send('Server is running.');

@@ -20,7 +20,7 @@ RUN npm install
 COPY . .
 
 # Install Python dependencies
-RUN pip3 install -r IOT_py/requirements.txt
+RUN pip3 install --break-system-packages -r IOT_py/requirements.txt
 
 # Expose the port (Railway uses $PORT)
 EXPOSE 3000

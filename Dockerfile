@@ -1,23 +1,25 @@
-# Use official Node.js image as base
-FROM node:18
+# Use a slim Node.js image as base
+FROM node:18-slim
 
-# Install Python3 and pip
-RUN apt-get update && apt-get install -y python3 python3-pip
-
-# Set python alias for compatibility
-RUN ln -s /usr/bin/python3 /usr/bin/python
+# Install Python3 and pip, then clean up apt cache
+RUN apt-get update && apt-get install -y python3 python3-pip && \
+    ln -s /usr/bin/python3 /usr/bin/python && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Copy package.json and package-lock.json
+# Copy only package files first for better layer caching
 COPY package*.json ./
 
 # Install Node.js dependencies
-RUN npm install
+RUN npm install --production
 
-# Copy the rest of the code
+# Copy only the necessary app files (exclude dev files, docs, etc.)
 COPY . .
+
+# Remove unnecessary files from the image
+RUN rm -rf /app/node_modules/.cache /app/tests /app/test /app/docs /app/.git /app/.github
 
 # Install Python dependencies
 RUN pip3 install --break-system-packages -r IOT_py/requirements.txt

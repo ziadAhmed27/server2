@@ -1,34 +1,26 @@
-# Ignore uploaded images
-uploads/
-
-# Ignore Python cache files
-__pycache__/
-*.pyc
-
-# Ignore processed images
-*.jpg
-*.jpeg
-*.png
-
-# Ignore environment files
-.env
-
 # Node.js dependencies
 node_modules/
 
-# SQLite database
-*.db
-
-# Logs
-logs/
-*.log
+# Build and log files
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# OS files
+# Server recordings and uploads
+recordings/
+uploads/
+
+# Flutter app files
+rtsp_forwarder/
+flutter_rtsp_forwarder.dart
+pubspec.yaml
+
+# Python app files
+IOT_py/
+
+# OS generated files
 .DS_Store
 Thumbs.db
 
-# Misc
-*.swp 
+# Environment files
+.env 

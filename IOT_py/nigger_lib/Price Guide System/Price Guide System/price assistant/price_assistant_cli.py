@@ -5,6 +5,7 @@ from PIL import Image
 import os
 import json
 import sys
+import unicodedata
 
 # ========== 1. Image Preprocessing ==========
 transform = transforms.Compose([
@@ -18,6 +19,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(BASE_DIR, "..", "AI recognition model")
 MODEL_DIR = os.path.abspath(MODEL_DIR)
 JSON_PATH = os.path.join(BASE_DIR, "vegetable_prices.json")
+
+def normalize(s):
+    return unicodedata.normalize('NFC', s.strip())
 
 # ========== 3. Load Labels ==========
 with open(os.path.join(MODEL_DIR, "labels.txt"), encoding="utf-8") as f:
@@ -46,7 +50,12 @@ def get_vegetable_prices(arabic_label):
     try:
         with open(JSON_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return arabic_label, data[arabic_label]["min"], data[arabic_label]["max"]
+        # Normalize all keys and the lookup
+        data = {normalize(k): v for k, v in data.items()}
+        nlabel = normalize(arabic_label)
+        print("Available keys:", list(data.keys()), file=sys.stderr)
+        print("Lookup key:", repr(nlabel), file=sys.stderr)
+        return nlabel, data[nlabel]["min"], data[nlabel]["max"]
     except KeyError:
         return None
     except FileNotFoundError:

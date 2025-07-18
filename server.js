@@ -40,7 +40,7 @@ app.post('/api/translate-image', upload.single('image'), (req, res) => {
     return res.status(400).json({ error: 'No image uploaded.' });
   }
   const imagePath = req.file.path;
-  const pythonProcess = spawn('python', ['IOT_py/arabic_to_english_cli.py', imagePath]);
+  const pythonProcess = spawn('python3', ['IOT_py/arabic_to_english_cli.py', imagePath]);
   let output = '';
   let errorOutput = '';
   pythonProcess.stdout.on('data', (data) => {

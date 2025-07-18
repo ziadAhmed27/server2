@@ -40,18 +40,23 @@ app.post('/api/translate-image', upload.single('image'), (req, res) => {
     return res.status(400).json({ error: 'No image uploaded.' });
   }
   const imagePath = req.file.path;
-  const pythonProcess = spawn('python', ['IOT_py/Arabic_to_Engish_talking.py', imagePath]);
+  const pythonProcess = spawn('python', ['IOT_py/arabic_to_english_cli.py', imagePath]);
   let output = '';
+  let errorOutput = '';
   pythonProcess.stdout.on('data', (data) => {
     output += data.toString();
   });
   pythonProcess.stderr.on('data', (data) => {
-    console.error('Python error:', data.toString());
+    errorOutput += data.toString();
   });
   pythonProcess.on('close', (code) => {
-    // Optionally delete the uploaded file after processing
-    // fs.unlinkSync(imagePath);
-    res.json({ translation: output.trim() });
+    // Delete the uploaded file after processing
+    fs.unlink(imagePath, () => {});
+    if (code === 0) {
+      res.json({ translation: output.trim() });
+    } else {
+      res.status(500).json({ error: errorOutput.trim() || 'Translation failed.' });
+    }
   });
 });
 

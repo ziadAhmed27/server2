@@ -1,8 +1,8 @@
 # Use a slim Node.js image as base
 FROM node:18-slim
 
-# Install FFmpeg
-RUN apt-get update && apt-get install -y ffmpeg && \
+# Install FFmpeg and Python3 with pip
+RUN apt-get update && apt-get install -y ffmpeg python3 python3-pip && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -17,8 +17,11 @@ RUN npm install --production
 # Copy the rest of the app
 COPY . .
 
+# Install Python dependencies
+RUN pip3 install easyocr opencv-python googletrans==4.0.0-rc1
+
 # Remove unnecessary files from the image
-RUN rm -rf /app/node_modules/.cache /app/tests /app/test /app/docs /app/.git /app/.github /app/IOT_py
+RUN rm -rf /app/node_modules/.cache /app/tests /app/test /app/docs /app/.git /app/.github
 
 # Expose the port (Railway uses $PORT)
 EXPOSE 3000

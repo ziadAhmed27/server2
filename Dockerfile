@@ -21,7 +21,7 @@ RUN rm -rf /app/node_modules/.cache /app/tests /app/test /app/docs /app/.git /ap
 COPY . .
 
 # Install Python dependencies
-RUN pip3 install --break-system-packages easyocr opencv-python googletrans==4.0.0-rc1
+RUN pip3 install --break-system-packages easyocr opencv-python googletrans==4.0.0-rc1 torch torchvision pillow
 
 # Expose the port (Railway uses $PORT)
 EXPOSE 3000

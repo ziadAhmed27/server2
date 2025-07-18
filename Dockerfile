@@ -18,7 +18,7 @@ RUN npm install --production
 COPY . .
 
 # Install Python dependencies
-RUN pip3 install easyocr opencv-python googletrans==4.0.0-rc1
+RUN pip3 install --break-system-packages easyocr opencv-python googletrans==4.0.0-rc1
 
 # Remove unnecessary files from the image
 RUN rm -rf /app/node_modules/.cache /app/tests /app/test /app/docs /app/.git /app/.github

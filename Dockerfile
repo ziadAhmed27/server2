@@ -14,14 +14,14 @@ COPY package*.json ./
 # Install Node.js dependencies
 RUN npm install --production
 
-# Copy the rest of the app
+# Remove unnecessary files from the image
+RUN rm -rf /app/node_modules/.cache /app/tests /app/test /app/docs /app/.git /app/.github
+
+# Copy the rest of the app (including IOT_py)
 COPY . .
 
 # Install Python dependencies
 RUN pip3 install --break-system-packages easyocr opencv-python googletrans==4.0.0-rc1
-
-# Remove unnecessary files from the image
-RUN rm -rf /app/node_modules/.cache /app/tests /app/test /app/docs /app/.git /app/.github
 
 # Expose the port (Railway uses $PORT)
 EXPOSE 3000

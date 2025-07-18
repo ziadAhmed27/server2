@@ -53,9 +53,9 @@ app.post('/api/recognize-place', upload.single('image'), (req, res) => {
     return res.status(400).json({ error: 'No image uploaded.' });
   }
   const imagePath = req.file.path;
-  // Path to the CLI script and model files
-  const scriptPath = path.join('IOT_py', 'nigger_lib', 'New folder', 'New folder', 'place_recognizer_cli.py');
-  const pythonProcess = spawn('python3', [scriptPath, imagePath], { cwd: path.dirname(scriptPath) });
+  // Use absolute path to the CLI script
+  const scriptPath = path.join(__dirname, 'IOT_py', 'nigger_lib', 'New folder', 'New folder', 'place_recognizer_cli.py');
+  const pythonProcess = spawn('python3', [scriptPath, imagePath]);
   let output = '';
   let errorOutput = '';
   pythonProcess.stdout.on('data', (data) => {

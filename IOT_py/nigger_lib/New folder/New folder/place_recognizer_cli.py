@@ -5,14 +5,15 @@ import torchvision.transforms as transforms
 from torchvision.models import mobilenet_v2
 from PIL import Image
 
-# Load label map
-with open("labels.txt", "r", encoding="utf-8") as f:
-    labels = [line.strip() for line in f]
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Load label map
+with open(os.path.join(SCRIPT_DIR, "labels.txt"), "r", encoding="utf-8") as f:
+    labels = [line.strip() for line in f]
 # Load model and weights
 model = mobilenet_v2(weights=None)
 model.classifier[1] = torch.nn.Linear(model.last_channel, len(labels))
-model.load_state_dict(torch.load("model_weights.pt", map_location=torch.device("cpu")))
+model.load_state_dict(torch.load(os.path.join(SCRIPT_DIR, "model_weights.pt"), map_location=torch.device("cpu")))
 model.eval()
 
 # Image preprocessing
@@ -23,7 +24,7 @@ transform = transforms.Compose([
 ])
 
 def load_script(label):
-    path = os.path.join("scripts", f"{label}.txt")
+    path = os.path.join(SCRIPT_DIR, "scripts", f"{label}.txt")
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             return f.read()

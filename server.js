@@ -76,6 +76,37 @@ app.post('/api/recognize-place', upload.single('image'), (req, res) => {
   });
 });
 
+app.post('/api/vegetable-price', upload.single('image'), (req, res) => {
+  const scriptPath = path.join(__dirname, 'IOT_py', 'nigger_lib', 'Price Guide System', 'Price Guide System', 'price assistant', 'price_assistant_cli.py');
+  let pythonProcess;
+  let arg;
+  if (req.file) {
+    arg = req.file.path;
+    pythonProcess = spawn('python3', [scriptPath, arg]);
+  } else if (req.body && req.body.name) {
+    arg = req.body.name;
+    pythonProcess = spawn('python3', [scriptPath, arg]);
+  } else {
+    return res.status(400).json({ error: 'No image or name provided.' });
+  }
+  let output = '';
+  let errorOutput = '';
+  pythonProcess.stdout.on('data', (data) => {
+    output += data.toString();
+  });
+  pythonProcess.stderr.on('data', (data) => {
+    errorOutput += data.toString();
+  });
+  pythonProcess.on('close', (code) => {
+    if (req.file) fs.unlink(arg, () => {});
+    if (code === 0) {
+      res.json({ result: output.trim() });
+    } else {
+      res.status(500).json({ error: errorOutput.trim() || 'Price lookup failed.' });
+    }
+  });
+});
+
 app.get('/', (req, res) => {
   res.send('Server is running.');
 });

@@ -16,7 +16,7 @@ flutter_rtsp_forwarder.dart
 pubspec.yaml
 
 # Python app files
-IOT_py/
+# IOT_py/
 
 # OS generated files
 .DS_Store

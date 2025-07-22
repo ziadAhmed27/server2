@@ -85,7 +85,7 @@ int main() {
                                 std::cout << "Downloaded " << filename << std::endl;
 
                                 // Run Python prediction script
-                                std::string command = "python ../IOT_py/placerec/predict.py \"" + local_path + "\"";
+                                std::string command = "py ../IOT_py/placerec/predict.py \"" + local_path + "\"";
                                 std::string label = exec(command.c_str());
                                 label.erase(label.find_last_not_of(" \n\r\t") + 1);
 

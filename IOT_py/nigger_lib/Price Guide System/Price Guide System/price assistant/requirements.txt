@@ -1,0 +1,6 @@
+torch
+torchvision
+Pillow
+pyttsx3
+requests
+beautifulsoup4 

@@ -95,11 +95,11 @@ app.post('/api/recognize-place/result', (req, res) => {
     const { request_id, label } = req.body;
     
     if (!request_id || !label || !placeRequests[request_id]) {
-        return res.status(400).json({ error: 'Invalid request' });
+        return res.status(400).json({ error: 'Invalid request_id or label' });
     }
 
-    placeRequests[requestId].status = 'done';
-    placeRequests[requestId].label = label;
+    placeRequests[request_id].status = 'done';
+    placeRequests[request_id].label = label;
     
     res.json({ success: true });
 });
@@ -166,11 +166,11 @@ app.post('/api/check-price/result', (req, res) => {
     const { request_id, result } = req.body;
     
     if (!request_id || !result || !priceRequests[request_id]) {
-        return res.status(400).json({ error: 'Invalid request' });
+        return res.status(400).json({ error: 'Invalid request_id or result' });
     }
 
-    priceRequests[requestId].status = 'done';
-    priceRequests[requestId].result = result;
+    priceRequests[request_id].status = 'done';
+    priceRequests[request_id].result = result;
     
     res.json({ success: true });
 });

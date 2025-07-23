@@ -66,7 +66,7 @@ app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
   };
 
   // Wait up to 15 seconds for result from the C++ app
-  const maxWaitTimeMs = 15000;
+  const maxWaitTimeMs = 50000;
   const pollIntervalMs = 500;
 
   const waitForResult = () => {

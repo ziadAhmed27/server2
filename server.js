@@ -66,38 +66,11 @@ app.post('/api/recognize-place', upload.single('image'), (req, res) => {
     label: null
   };
 
-<<<<<<< HEAD
   res.json({ 
     request_id: requestId, 
     status: 'pending',
     image_url: imageUrl
   });
-=======
-  // Wait up to 15 seconds for result from the C++ app
-  const maxWaitTimeMs = 50000;
-  const pollIntervalMs = 500;
-
-  const waitForResult = () => {
-    return new Promise((resolve) => {
-      const start = Date.now();
-      const check = () => {
-        const elapsed = Date.now() - start;
-        const current = placeRequests[requestId];
-        if (current && current.status === 'done' && current.label) {
-          resolve({ status: 'done', label: current.label });
-        } else if (elapsed >= maxWaitTimeMs) {
-          resolve({ status: 'pending', message: 'Timed out waiting for result.' });
-        } else {
-          setTimeout(check, pollIntervalMs);
-        }
-      };
-      check();
-    });
-  };
-
-  const result = await waitForResult();
-  res.json({ request_id: requestId, ...result });
->>>>>>> 317415444ab64308b542c6a0ac409f2d313ad0e4
 });
 
 app.get('/api/recognize-place/pending', (req, res) => {

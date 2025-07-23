@@ -24,121 +24,88 @@ initDb();
 // Routes
 app.use('/api/customers', customerRoutes);
 
-// Upload directory
-const uploadDir = path.join(__dirname, 'uploads', 'place_recognition');
+const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
-const upload = multer({ dest: uploadDir });
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname) || '.jpg';
+    const filename = `${uuidv4()}${ext}`;
+    cb(null, filename);
+  }
+});
+
+const upload = multer({ storage: storage });
 
 // In-memory request tracking
 const placeRequests = {};
 const priceRequests = {};
 
-<<<<<<< HEAD
 // ---------------------------
 // Place Recognition Endpoints
 // ---------------------------
 app.post('/api/recognize-place', upload.single('image'), (req, res) => {
-=======
-// ✅ Modified endpoint: waits for C++ AI result before responding
-app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
->>>>>>> refs/remotes/origin/main
   const userId = req.body.user_id;
   if (!req.file || !userId) {
     return res.status(400).json({ error: 'Missing image or user_id' });
   }
 
-  const ext = path.extname(req.file.originalname) || '.jpg';
   const requestId = uuidv4();
-  const filename = `${userId}_${Date.now()}_${requestId}${ext}`;
-  const destPath = path.join(uploadDir, filename);
-  fs.renameSync(req.file.path, destPath);
-
-  const imageUrl = `/uploads/place_recognition/${filename}`;
+  const imageUrl = `/uploads/${req.file.filename}`;
 
   placeRequests[requestId] = {
     user_id: userId,
-    image_path: destPath,
+    image_path: req.file.path,
     image_url: imageUrl,
     status: 'pending',
     label: null
   };
 
-  // Wait up to 15 seconds for result from the C++ app
-  const maxWaitTimeMs = 15000;
-  const pollIntervalMs = 500;
-
-  const waitForResult = () => {
-    return new Promise((resolve) => {
-      const start = Date.now();
-      const check = () => {
-        const elapsed = Date.now() - start;
-        const current = placeRequests[requestId];
-        if (current && current.status === 'done' && current.label) {
-          resolve({ status: 'done', label: current.label });
-        } else if (elapsed >= maxWaitTimeMs) {
-          resolve({ status: 'pending', message: 'Timed out waiting for result.' });
-        } else {
-          setTimeout(check, pollIntervalMs);
-        }
-      };
-      check();
-    });
-  };
-
-  const result = await waitForResult();
-  res.json({ request_id: requestId, ...result });
+  res.json({ 
+    request_id: requestId, 
+    status: 'pending',
+    image_url: imageUrl
+  });
 });
 
-// Called by C++ client to post back AI result
-app.post('/api/recognize-place/result', (req, res) => {
-  const { request_id, label } = req.body;
-  if (!request_id || !label || !placeRequests[request_id]) {
-    return res.status(400).json({ error: 'Invalid request_id or label' });
-  }
-
-  placeRequests[request_id].status = 'done';
-  placeRequests[request_id].label = label;
-
-  res.json({ success: true });
-});
-
-// Get list of pending recognition tasks (called by C++ app)
 app.get('/api/recognize-place/pending', (req, res) => {
   const pending = Object.entries(placeRequests)
     .filter(([, request]) => request.status === 'pending')
     .map(([id, request]) => ({
       request_id: id,
-      image_url: request.image_url
+      image_url: request.image_url,
+      image_path: request.image_path
     }));
   res.json(pending);
 });
 
-<<<<<<< HEAD
 app.post('/api/recognize-place/result', (req, res) => {
   const { request_id, label } = req.body;
   if (!request_id || !label || !placeRequests[request_id]) {
     return res.status(400).json({ error: 'Invalid request_id or label' });
   }
+  
   placeRequests[request_id].status = 'done';
   placeRequests[request_id].label = label;
+  
   res.json({ success: true });
 });
 
-=======
-// User checks recognition status (not strictly required anymore)
->>>>>>> refs/remotes/origin/main
 app.get('/api/recognize-place/status', (req, res) => {
   const { request_id } = req.query;
   if (!request_id || !placeRequests[request_id]) {
     return res.status(404).json({ error: 'Request not found' });
   }
-  const { status, label } = placeRequests[request_id];
-  res.json({ status, label });
+  
+  const { status, label, image_url } = placeRequests[request_id];
+  res.json({ status, label, image_url });
 });
 
-<<<<<<< HEAD
 // ---------------------------
 // Price Check Endpoints
 // ---------------------------
@@ -147,22 +114,23 @@ app.post('/api/check-price', upload.single('image'), (req, res) => {
   if (!req.file || !userId) {
     return res.status(400).json({ error: 'Missing image or user_id' });
   }
-  const ext = path.extname(req.file.originalname) || '.jpg';
-  const requestId = uuidv4();
-  const filename = `${userId}_${Date.now()}_${requestId}${ext}`;
-  const destPath = path.join(uploadDir, filename);
-  fs.renameSync(req.file.path, destPath);
 
-  const imageUrl = `/uploads/place_recognition/${filename}`;
+  const requestId = uuidv4();
+  const imageUrl = `/uploads/${req.file.filename}`;
 
   priceRequests[requestId] = {
     user_id: userId,
-    image_path: destPath,
+    image_path: req.file.path,
     image_url: imageUrl,
     status: 'pending',
     result: null
   };
-  res.json({ request_id: requestId, status: 'pending' });
+
+  res.json({ 
+    request_id: requestId, 
+    status: 'pending',
+    image_url: imageUrl
+  });
 });
 
 app.get('/api/check-price/pending', (req, res) => {
@@ -170,7 +138,8 @@ app.get('/api/check-price/pending', (req, res) => {
     .filter(([, request]) => request.status === 'pending')
     .map(([id, request]) => ({
       request_id: id,
-      image_url: request.image_url
+      image_url: request.image_url,
+      image_path: request.image_path
     }));
   res.json(pending);
 });
@@ -180,8 +149,10 @@ app.post('/api/check-price/result', (req, res) => {
   if (!request_id || !result || !priceRequests[request_id]) {
     return res.status(400).json({ error: 'Invalid request_id or result' });
   }
+  
   priceRequests[request_id].status = 'done';
   priceRequests[request_id].result = result;
+  
   res.json({ success: true });
 });
 
@@ -190,56 +161,33 @@ app.get('/api/check-price/status', (req, res) => {
   if (!request_id || !priceRequests[request_id]) {
     return res.status(404).json({ error: 'Request not found' });
   }
-  const { status, result } = priceRequests[requestId];
-  res.json({ status, result });
+  
+  const { status, result, image_url } = priceRequests[request_id];
+  res.json({ status, result, image_url });
 });
 
 // ---------------------------
-// Vegetable Price Endpoint (legacy)
+// Server Status Endpoint
 // ---------------------------
-=======
-// Example: vegetable price prediction
->>>>>>> refs/remotes/origin/main
-app.post('/api/vegetable-price', upload.single('image'), (req, res) => {
-  const scriptPath = path.join(__dirname, 'IOT_py', 'nigger_lib', 'Price Guide System', 'Price Guide System', 'price assistant', 'price_assistant_cli.py');
-  let pythonProcess;
-  let arg;
-  if (req.file) {
-    arg = req.file.path;
-    pythonProcess = spawn('python3', [scriptPath, arg]);
-  } else if (req.body && req.body.name) {
-    arg = req.body.name;
-    pythonProcess = spawn('python3', [scriptPath, arg]);
-  } else {
-    return res.status(400).json({ error: 'No image or name provided.' });
-  }
-  let output = '';
-  let errorOutput = '';
-  pythonProcess.stdout.on('data', (data) => {
-    output += data.toString();
-  });
-  pythonProcess.stderr.on('data', (data) => {
-    errorOutput += data.toString();
-  });
-  pythonProcess.on('close', (code) => {
-    if (req.file) fs.unlink(arg, () => {});
-    if (code === 0) {
-      res.json({ result: output.trim() });
-    } else {
-      res.status(500).json({ error: errorOutput.trim() || 'Price lookup failed.' });
-    }
-  });
-});
-
-// Health check
 app.get('/', (req, res) => {
-  res.send('Server is running.');
+  res.json({
+    status: 'running',
+    services: {
+      place_recognition: true,
+      price_check: true
+    },
+    uptime: process.uptime()
+  });
 });
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Something went wrong!' });
+});
+
+// Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-<<<<<<< HEAD
+  console.log(`Upload directory: ${uploadDir}`);
 });
-=======
-});
->>>>>>> refs/remotes/origin/main

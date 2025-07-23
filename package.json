@@ -15,11 +15,11 @@
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
-    "multer": "^2.0.1",
-    "sqlite3": "^5.1.7",
-    "node-rtsp-stream": "^0.0.9",
-    "ws": "^8.14.2",
     "fluent-ffmpeg": "^2.1.2",
-    "uuid": "^9.0.1"
+    "multer": "^2.0.2",
+    "node-rtsp-stream": "^0.0.9",
+    "sqlite3": "^5.1.7",
+    "uuid": "^9.0.1",
+    "ws": "^8.14.2"
   }
 }

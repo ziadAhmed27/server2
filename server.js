@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
+const placeRequests = {};
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -104,6 +105,58 @@ app.post('/api/check-price/result', (req, res) => {
     res.json({ success: true });
 });
 
+app.post('/api/recognize-place', upload.single('image'), (req, res) => {
+    const userId = req.body.user_id;
+    if (!req.file || !userId) {
+        return res.status(400).json({ error: 'Missing image or user_id' });
+    }
+
+    const requestId = uuidv4();
+    const imageUrl = `/uploads/${req.file.filename}`;
+
+    placeRequests[requestId] = {
+        user_id: userId,
+        image_path: req.file.path,
+        image_url: imageUrl,
+        status: 'pending',
+        label: null
+    };
+
+    res.json({ 
+        request_id: requestId, 
+        status: 'pending',
+        image_url: imageUrl
+    });
+});
+
+app.get('/api/recognize-place/pending', (req, res) => {
+    const pending = Object.entries(placeRequests)
+        .filter(([, request]) => request.status === 'pending')
+        .map(([id, request]) => ({
+            request_id: id,
+            image_url: request.image_url
+        }));
+    res.json(pending);
+});
+
+app.post('/api/recognize-place/result', (req, res) => {
+    const { request_id, label } = req.body;
+    if (!request_id || !label || !placeRequests[request_id]) {
+        return res.status(400).json({ error: 'Invalid request_id or label' });
+    }
+    placeRequests[request_id].status = 'done';
+    placeRequests[request_id].label = label;
+    res.json({ success: true });
+});
+
+app.get('/api/recognize-place/status', (req, res) => {
+    const { request_id } = req.query;
+    if (!request_id || !placeRequests[request_id]) {
+        return res.status(404).json({ error: 'Request not found' });
+    }
+    const { status, label } = placeRequests[request_id];
+    res.json({ status, label });
+});
 // Cleanup old requests
 setInterval(() => {
     const now = Date.now();

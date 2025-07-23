@@ -32,8 +32,11 @@ const upload = multer({ dest: uploadDir });
 
 // In-memory request tracking
 const placeRequests = {};
+const priceRequests = {};
 
-// User uploads photo for place recognition
+// ---------------------------
+// Place Recognition Endpoints
+// ---------------------------
 app.post('/api/recognize-place', upload.single('image'), (req, res) => {
   const userId = req.body.user_id;
   if (!req.file || !userId) {
@@ -67,7 +70,6 @@ app.get('/api/recognize-place/pending', (req, res) => {
   res.json(pending);
 });
 
-// C++ app posts result
 app.post('/api/recognize-place/result', (req, res) => {
   const { request_id, label } = req.body;
   if (!request_id || !label || !placeRequests[request_id]) {
@@ -78,7 +80,6 @@ app.post('/api/recognize-place/result', (req, res) => {
   res.json({ success: true });
 });
 
-// User checks status/result
 app.get('/api/recognize-place/status', (req, res) => {
   const { request_id } = req.query;
   if (!request_id || !placeRequests[request_id]) {
@@ -88,6 +89,64 @@ app.get('/api/recognize-place/status', (req, res) => {
   res.json({ status, label });
 });
 
+// ---------------------------
+// Price Check Endpoints
+// ---------------------------
+app.post('/api/check-price', upload.single('image'), (req, res) => {
+  const userId = req.body.user_id;
+  if (!req.file || !userId) {
+    return res.status(400).json({ error: 'Missing image or user_id' });
+  }
+  const ext = path.extname(req.file.originalname) || '.jpg';
+  const requestId = uuidv4();
+  const filename = `${userId}_${Date.now()}_${requestId}${ext}`;
+  const destPath = path.join(uploadDir, filename);
+  fs.renameSync(req.file.path, destPath);
+
+  const imageUrl = `/uploads/place_recognition/${filename}`;
+
+  priceRequests[requestId] = {
+    user_id: userId,
+    image_path: destPath,
+    image_url: imageUrl,
+    status: 'pending',
+    result: null
+  };
+  res.json({ request_id: requestId, status: 'pending' });
+});
+
+app.get('/api/check-price/pending', (req, res) => {
+  const pending = Object.entries(priceRequests)
+    .filter(([, request]) => request.status === 'pending')
+    .map(([id, request]) => ({
+      request_id: id,
+      image_url: request.image_url
+    }));
+  res.json(pending);
+});
+
+app.post('/api/check-price/result', (req, res) => {
+  const { request_id, result } = req.body;
+  if (!request_id || !result || !priceRequests[request_id]) {
+    return res.status(400).json({ error: 'Invalid request_id or result' });
+  }
+  priceRequests[request_id].status = 'done';
+  priceRequests[request_id].result = result;
+  res.json({ success: true });
+});
+
+app.get('/api/check-price/status', (req, res) => {
+  const { request_id } = req.query;
+  if (!request_id || !priceRequests[request_id]) {
+    return res.status(404).json({ error: 'Request not found' });
+  }
+  const { status, result } = priceRequests[requestId];
+  res.json({ status, result });
+});
+
+// ---------------------------
+// Vegetable Price Endpoint (legacy)
+// ---------------------------
 app.post('/api/vegetable-price', upload.single('image'), (req, res) => {
   const scriptPath = path.join(__dirname, 'IOT_py', 'nigger_lib', 'Price Guide System', 'Price Guide System', 'price assistant', 'price_assistant_cli.py');
   let pythonProcess;
@@ -125,4 +184,4 @@ app.get('/', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-}); 
+});

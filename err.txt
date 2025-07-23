@@ -1,7 +1,0 @@
-The system cannot find the path specified.
-WARNING: You are using pip version 21.2.3; however, version 25.1.1 is available.
-You should consider upgrading via the 'C:\Users\pc\AppData\Local\Programs\Python\Python310\python.exe -m pip install --upgrade pip' command.
-Traceback (most recent call last):
-  File "C:\server2\IOT_py\predict.py", line 3, in <module>
-    import torch
-ModuleNotFoundError: No module named 'torch'

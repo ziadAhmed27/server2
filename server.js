@@ -91,29 +91,6 @@ const cleanupOldRequests = () => {
     cleanup(requestStores.translation);
 };
 
-// Request processing helper
-const processRequest = async (store, requestId, res, successCallback) => {
-    const startTime = Date.now();
-    
-    while (store.get(requestId)?.status === 'processing') {
-        if (Date.now() - startTime > config.requestTimeout) {
-            store.get(requestId).status = 'timeout';
-            return res.status(504).json({
-                status: 'timeout',
-                request_id: requestId,
-                message: 'Processing took too long'
-            });
-        }
-        await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    if (store.get(requestId)?.status === 'done') {
-        return successCallback(store.get(requestId));
-    }
-
-    return res.status(500).json({ error: 'Request processing failed' });
-};
-
 // ========== Place Recognition Endpoints ==========
 app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
     try {
@@ -135,13 +112,11 @@ app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
             timestamp: Date.now()
         });
 
-        await processRequest(requestStores.place, requestId, res, (request) => {
-            res.json({
-                status: 'success',
-                request_id: requestId,
-                label: request.label,
-                image_url: imageUrl
-            });
+        // Immediate response with request details
+        res.json({
+            status: 'processing',
+            request_id: requestId,
+            image_url: imageUrl
         });
 
     } catch (error) {
@@ -150,25 +125,6 @@ app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
             error: 'Internal server error',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
-    }
-});
-
-app.get('/api/recognize-place/pending', (req, res) => {
-    try {
-        const pending = [];
-        requestStores.place.forEach((req, id) => {
-            if (req.status === 'processing') {
-                pending.push({
-                    request_id: id,
-                    image_url: req.image_url,
-                    timestamp: req.timestamp
-                });
-            }
-        });
-        res.json(pending);
-    } catch (error) {
-        console.error('Pending requests error:', error);
-        res.status(500).json({ error: 'Failed to get pending requests' });
     }
 });
 
@@ -212,13 +168,11 @@ app.post('/api/check-price', upload.single('image'), async (req, res) => {
             timestamp: Date.now()
         });
 
-        await processRequest(requestStores.price, requestId, res, (request) => {
-            res.json({
-                status: 'success',
-                request_id: requestId,
-                result: request.result,
-                image_url: imageUrl
-            });
+        // Immediate response with request details
+        res.json({
+            status: 'processing',
+            request_id: requestId,
+            image_url: imageUrl
         });
 
     } catch (error) {
@@ -227,25 +181,6 @@ app.post('/api/check-price', upload.single('image'), async (req, res) => {
             error: 'Internal server error',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
-    }
-});
-
-app.get('/api/check-price/pending', (req, res) => {
-    try {
-        const pending = [];
-        requestStores.price.forEach((req, id) => {
-            if (req.status === 'processing') {
-                pending.push({
-                    request_id: id,
-                    image_url: req.image_url,
-                    timestamp: req.timestamp
-                });
-            }
-        });
-        res.json(pending);
-    } catch (error) {
-        console.error('Pending requests error:', error);
-        res.status(500).json({ error: 'Failed to get pending requests' });
     }
 });
 
@@ -279,10 +214,13 @@ app.post('/api/translate', express.json(), (req, res) => {
         }
 
         const { text } = req.body;
-        if (!text || typeof text !== 'string' || text.trim().length === 0) {
+        
+        // Enhanced Arabic text validation
+        const arabicRegex = /[\u0600-\u06FF]/;
+        if (!text || typeof text !== 'string' || !arabicRegex.test(text)) {
             return res.status(400).json({ 
-                error: 'Invalid text input',
-                details: 'Text must be a non-empty string' 
+                error: 'Invalid Arabic text input',
+                details: 'Text must contain valid Arabic characters'
             });
         }
 
@@ -291,9 +229,11 @@ app.post('/api/translate', express.json(), (req, res) => {
             text_input: text.trim(),
             status: 'processing',
             result: null,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            attempts: 0
         });
 
+        // Immediate response with request details
         res.json({
             status: 'processing',
             request_id: requestId,
@@ -309,48 +249,46 @@ app.post('/api/translate', express.json(), (req, res) => {
     }
 });
 
-// ADDED THIS MISSING ENDPOINT
-app.get('/api/translate/pending', (req, res) => {
-    try {
-        const pending = [];
-        requestStores.translation.forEach((req, id) => {
-            if (req.status === 'processing') {
-                pending.push({
-                    request_id: id,
-                    text_input: req.text_input,
-                    timestamp: req.timestamp
-                });
-            }
-        });
-        res.json(pending);
-    } catch (error) {
-        console.error('Pending translations error:', error);
-        res.status(500).json({ 
-            error: 'Internal server error',
-            details: error.message 
-        });
-    }
-});
-
 app.post('/api/translate/result', express.json(), (req, res) => {
     try {
-        const { request_id, arabic_text, english_translation } = req.body;
+        const { request_id, arabic_text, english_translation, error } = req.body;
         
-        if (!request_id || !arabic_text || !requestStores.translation.get(request_id)) {
-            return res.status(400).json({ 
+        if (!requestStores.translation.get(request_id)) {
+            return res.status(404).json({ 
                 error: 'Invalid request',
-                details: 'Missing required fields' 
+                details: 'Request not found' 
             });
         }
 
         const request = requestStores.translation.get(request_id);
+        
+        if (error) {
+            // Handle translation errors
+            request.attempts = (request.attempts || 0) + 1;
+            request.status = 'failed';
+            request.result = { error };
+            
+            return res.json({ 
+                success: false,
+                attempts: request.attempts 
+            });
+        }
+
+        if (!arabic_text) {
+            return res.status(400).json({ 
+                error: 'Invalid result',
+                details: 'Missing arabic_text in result' 
+            });
+        }
+
         request.status = 'done';
         request.result = {
-            arabic_text,
+            arabic_text: arabic_text,
             english_translation: english_translation || ''
         };
         
         res.json({ success: true });
+
     } catch (error) {
         console.error('Result update error:', error);
         res.status(500).json({ 
@@ -360,30 +298,23 @@ app.post('/api/translate/result', express.json(), (req, res) => {
     }
 });
 
-app.get('/api/translate/status/:requestId', (req, res) => {
+// Worker endpoint to get pending translations
+app.get('/api/translate/pending', (req, res) => {
     try {
-        const requestId = req.params.requestId;
-        const request = requestStores.translation.get(requestId);
-
-        if (!request) {
-            return res.status(404).json({ 
-                error: 'Request not found',
-                details: 'Invalid request ID or request expired' 
-            });
-        }
-
-        res.json({
-            status: request.status,
-            request_id: requestId,
-            ...(request.status === 'done' ? {
-                arabic_text: request.result.arabic_text,
-                english_translation: request.result.english_translation
-            } : {
-                message: 'Translation in progress'
-            })
+        const pending = [];
+        requestStores.translation.forEach((req, id) => {
+            if (req.status === 'processing' && req.attempts < 3) {
+                pending.push({
+                    request_id: id,
+                    text_input: req.text_input,
+                    timestamp: req.timestamp,
+                    attempts: req.attempts || 0
+                });
+            }
         });
+        res.json(pending);
     } catch (error) {
-        console.error('Status check error:', error);
+        console.error('Pending translations error:', error);
         res.status(500).json({ 
             error: 'Internal server error',
             details: error.message 
@@ -409,13 +340,10 @@ app.listen(PORT, () => {
     console.log(`Upload directory: ${config.uploadDir}`);
     console.log('Available endpoints:');
     console.log('- POST   /api/recognize-place');
-    console.log('- GET    /api/recognize-place/pending');
     console.log('- POST   /api/recognize-place/result');
     console.log('- POST   /api/check-price');
-    console.log('- GET    /api/check-price/pending');
     console.log('- POST   /api/check-price/result');
     console.log('- POST   /api/translate');
-    console.log('- GET    /api/translate/pending');
-    console.log('- POST   /api/translate/result');
-    console.log('- GET    /api/translate/status/:requestId');
+    console.log('- GET    /api/translate/pending (worker only)');
+    console.log('- POST   /api/translate/result (worker only)');
 });

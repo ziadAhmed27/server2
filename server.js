@@ -263,38 +263,80 @@ app.post('/api/check-price/result', express.json(), (req, res) => {
 });
 
 // ========== Translation Endpoints ==========
-app.post('/api/translate', upload.single('file'), async (req, res) => {
+app.post('/api/translate', (req, res) => {
     try {
-        if (!req.file) {
-            return res.status(400).json({ 
-                error: 'No file provided',
-                details: 'Please upload a valid image or JSON file'
+        // Check if request has file (multipart/form-data) or raw JSON (application/json)
+        if (req.headers['content-type']?.startsWith('multipart/form-data')) {
+            // Handle file upload
+            upload.single('file')(req, res, (err) => {
+                if (err) {
+                    return res.status(400).json({ 
+                        error: 'File upload error',
+                        details: err.message 
+                    });
+                }
+
+                if (!req.file) {
+                    return res.status(400).json({ 
+                        error: 'No file provided',
+                        details: 'Please upload a valid image or JSON file'
+                    });
+                }
+
+                const requestId = uuidv4();
+                const fileUrl = `/uploads/${req.file.filename}`;
+                const processingPath = path.join(config.processingDir, `${requestId}${path.extname(req.file.filename)}`);
+                
+                // Move file to processing directory
+                fs.renameSync(req.file.path, processingPath);
+
+                requestStores.translation.set(requestId, {
+                    file_path: req.file.path,
+                    processing_path: processingPath,
+                    file_url: fileUrl,
+                    status: 'pending',
+                    result: null,
+                    timestamp: Date.now(),
+                    input_type: req.file.mimetype === 'application/json' ? 'json_file' : 'image_file'
+                });
+
+                res.json({
+                    status: 'pending',
+                    request_id: requestId,
+                    file_url: fileUrl,
+                    message: 'Translation request accepted'
+                });
+            });
+        } else {
+            // Handle raw JSON input
+            const { arabic_text } = req.body;
+            
+            if (!arabic_text) {
+                return res.status(400).json({ 
+                    error: 'No Arabic text provided',
+                    details: 'Please provide arabic_text in the request body'
+                });
+            }
+
+            const requestId = uuidv4();
+            
+            requestStores.translation.set(requestId, {
+                file_path: null,
+                processing_path: null,
+                file_url: null,
+                status: 'pending',
+                result: null,
+                timestamp: Date.now(),
+                input_type: 'raw_text',
+                arabic_text: arabic_text
+            });
+
+            res.json({
+                status: 'pending',
+                request_id: requestId,
+                message: 'Translation request accepted'
             });
         }
-
-        const requestId = uuidv4();
-        const fileUrl = `/uploads/${req.file.filename}`;
-        const processingPath = path.join(config.processingDir, `${requestId}${path.extname(req.file.filename)}`);
-        
-        // Move file to processing directory
-        fs.renameSync(req.file.path, processingPath);
-
-        requestStores.translation.set(requestId, {
-            file_path: req.file.path,
-            processing_path: processingPath,
-            file_url: fileUrl,
-            status: 'pending',
-            result: null,
-            timestamp: Date.now()
-        });
-
-        res.json({
-            status: 'pending',
-            request_id: requestId,
-            file_url: fileUrl,
-            message: 'Translation request accepted'
-        });
-
     } catch (error) {
         console.error('Translation request error:', error);
         res.status(500).json({ 
@@ -313,7 +355,8 @@ app.get('/api/translate/pending', (req, res) => {
                     request_id: id,
                     file_url: req.file_url,
                     processing_path: req.processing_path,
-                    timestamp: req.timestamp
+                    timestamp: req.timestamp,
+                    input_type: req.input_type
                 });
             }
         });
@@ -341,11 +384,11 @@ app.post('/api/translate/complete', express.json(), (req, res) => {
         const request = requestStores.translation.get(request_id);
         request.status = 'completed';
         request.result = {
-            arabic_text: arabic_text || '',
+            arabic_text: arabic_text || request.arabic_text || '',
             english_translation: english_translation || ''
         };
 
-        // Cleanup files
+        // Cleanup files if they exist
         if (request.file_path && fs.existsSync(request.file_path)) {
             fs.unlinkSync(request.file_path);
         }
@@ -387,7 +430,8 @@ app.get('/api/translate/result/:requestId', (req, res) => {
             status: 'completed',
             request_id: requestId,
             arabic_text: request.result.arabic_text,
-            english_translation: request.result.english_translation
+            english_translation: request.result.english_translation,
+            input_type: request.input_type
         });
     } catch (error) {
         console.error('Result check error:', error);

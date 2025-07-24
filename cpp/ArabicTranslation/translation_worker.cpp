@@ -15,7 +15,7 @@ namespace fs = std::filesystem;
 using json = nlohmann::json;
 
 // Configuration
-const std::string SERVER_HOST = "localhost";
+const std::string SERVER_HOST = "https://server2-production-3f9a.up.railway.app";
 const int SERVER_PORT = 3000;
 const std::string DOWNLOAD_DIR = "downloads";
 const std::string PYTHON_APP = "pyApp\\translation.py";
@@ -78,7 +78,7 @@ std::string HttpPostJson(const std::string& path, const json& data) {
 
 // Run Python script and get output
 std::string RunPythonScript(const std::string& scriptPath, const std::string& inputFile) {
-    std::string command = "python " + scriptPath + " \"" + inputFile + "\"";
+    std::string command = "py " + scriptPath + " \"" + inputFile + "\"";
     std::array<char, 128> buffer;
     std::string result;
 

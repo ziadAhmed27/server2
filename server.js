@@ -12,19 +12,22 @@ const PORT = process.env.PORT || 3000;
 // Enhanced Configuration
 const config = {
     uploadDir: path.join(__dirname, 'uploads'),
+    tempDir: path.join(__dirname, 'temp'),
     requestTimeout: 60000, // 60 seconds
     cleanupInterval: 3600000, // 1 hour
     maxFileSize: 5 * 1024 * 1024, // 5MB
     allowedFileTypes: ['image/jpeg', 'image/png', 'image/webp'],
-    maxRequests: 1000 // Maximum requests to keep in memory
+    maxRequests: 1000
 };
 
-// Ensure upload directory exists
-if (!fs.existsSync(config.uploadDir)) {
-    fs.mkdirSync(config.uploadDir, { recursive: true });
-}
+// Ensure directories exist
+[config.uploadDir, config.tempDir].forEach(dir => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+});
 
-// Middleware with enhanced security
+// Middleware
 app.use(cors({
     origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
     methods: ['GET', 'POST', 'OPTIONS'],
@@ -33,11 +36,9 @@ app.use(cors({
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use('/uploads', express.static(config.uploadDir));
 
-// Configure upload storage with enhanced validation
+// Configure upload storage
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, config.uploadDir);
-    },
+    destination: config.uploadDir,
     filename: (req, file, cb) => {
         const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
         cb(null, `${uuidv4()}${ext}`);
@@ -61,7 +62,7 @@ const upload = multer({
     }
 });
 
-// Request tracking with size limits
+// Request tracking
 const requestStores = {
     place: new Map(),
     price: new Map(),
@@ -78,6 +79,9 @@ const cleanupOldRequests = () => {
                     if (req.image_path && fs.existsSync(req.image_path)) {
                         fs.unlinkSync(req.image_path);
                     }
+                    if (req.temp_file_path && fs.existsSync(req.temp_file_path)) {
+                        fs.unlinkSync(req.temp_file_path);
+                    }
                     store.delete(id);
                 } catch (err) {
                     console.error('Cleanup error:', err);
@@ -89,6 +93,18 @@ const cleanupOldRequests = () => {
     cleanup(requestStores.place);
     cleanup(requestStores.price);
     cleanup(requestStores.translation);
+
+    // Cleanup old temp files
+    fs.readdir(config.tempDir, (err, files) => {
+        if (err) return;
+        files.forEach(file => {
+            const filePath = path.join(config.tempDir, file);
+            const stat = fs.statSync(filePath);
+            if (now - stat.mtimeMs > config.cleanupInterval) {
+                fs.unlinkSync(filePath);
+            }
+        });
+    });
 };
 
 // ========== Place Recognition Endpoints ==========
@@ -112,7 +128,6 @@ app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
             timestamp: Date.now()
         });
 
-        // Immediate response with request details
         res.json({
             status: 'processing',
             request_id: requestId,
@@ -125,6 +140,25 @@ app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
             error: 'Internal server error',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
+    }
+});
+
+app.get('/api/recognize-place/pending', (req, res) => {
+    try {
+        const pending = [];
+        requestStores.place.forEach((req, id) => {
+            if (req.status === 'processing') {
+                pending.push({
+                    request_id: id,
+                    image_url: req.image_url,
+                    timestamp: req.timestamp
+                });
+            }
+        });
+        res.json(pending);
+    } catch (error) {
+        console.error('Pending requests error:', error);
+        res.status(500).json({ error: 'Failed to get pending requests' });
     }
 });
 
@@ -168,7 +202,6 @@ app.post('/api/check-price', upload.single('image'), async (req, res) => {
             timestamp: Date.now()
         });
 
-        // Immediate response with request details
         res.json({
             status: 'processing',
             request_id: requestId,
@@ -181,6 +214,25 @@ app.post('/api/check-price', upload.single('image'), async (req, res) => {
             error: 'Internal server error',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
+    }
+});
+
+app.get('/api/check-price/pending', (req, res) => {
+    try {
+        const pending = [];
+        requestStores.price.forEach((req, id) => {
+            if (req.status === 'processing') {
+                pending.push({
+                    request_id: id,
+                    image_url: req.image_url,
+                    timestamp: req.timestamp
+                });
+            }
+        });
+        res.json(pending);
+    } catch (error) {
+        console.error('Pending requests error:', error);
+        res.status(500).json({ error: 'Failed to get pending requests' });
     }
 });
 
@@ -214,9 +266,8 @@ app.post('/api/translate', express.json(), (req, res) => {
         }
 
         const { text } = req.body;
+        const arabicRegex = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
         
-        // Enhanced Arabic text validation
-        const arabicRegex = /[\u0600-\u06FF]/;
         if (!text || typeof text !== 'string' || !arabicRegex.test(text)) {
             return res.status(400).json({ 
                 error: 'Invalid Arabic text input',
@@ -225,15 +276,18 @@ app.post('/api/translate', express.json(), (req, res) => {
         }
 
         const requestId = uuidv4();
+        const tempFilePath = path.join(config.tempDir, `${requestId}.txt`);
+        fs.writeFileSync(tempFilePath, text.trim(), 'utf8');
+
         requestStores.translation.set(requestId, {
             text_input: text.trim(),
+            temp_file_path: tempFilePath,
             status: 'processing',
             result: null,
             timestamp: Date.now(),
             attempts: 0
         });
 
-        // Immediate response with request details
         res.json({
             status: 'processing',
             request_id: requestId,
@@ -245,6 +299,29 @@ app.post('/api/translate', express.json(), (req, res) => {
         res.status(500).json({ 
             error: 'Internal server error',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+app.get('/api/translate/pending', (req, res) => {
+    try {
+        const pending = [];
+        requestStores.translation.forEach((req, id) => {
+            if (req.status === 'processing' && req.attempts < 3) {
+                pending.push({
+                    request_id: id,
+                    temp_file_path: req.temp_file_path,
+                    timestamp: req.timestamp,
+                    attempts: req.attempts || 0
+                });
+            }
+        });
+        res.json(pending);
+    } catch (error) {
+        console.error('Pending translations error:', error);
+        res.status(500).json({ 
+            error: 'Internal server error',
+            details: error.message 
         });
     }
 });
@@ -263,15 +340,17 @@ app.post('/api/translate/result', express.json(), (req, res) => {
         const request = requestStores.translation.get(request_id);
         
         if (error) {
-            // Handle translation errors
             request.attempts = (request.attempts || 0) + 1;
-            request.status = 'failed';
-            request.result = { error };
-            
-            return res.json({ 
-                success: false,
-                attempts: request.attempts 
-            });
+            if (request.attempts >= 3) {
+                request.status = 'failed';
+                request.result = { error: 'Max retries exceeded' };
+                
+                // Cleanup temp file
+                if (request.temp_file_path && fs.existsSync(request.temp_file_path)) {
+                    fs.unlinkSync(request.temp_file_path);
+                }
+            }
+            return res.json({ success: false, attempts: request.attempts });
         }
 
         if (!arabic_text) {
@@ -287,8 +366,12 @@ app.post('/api/translate/result', express.json(), (req, res) => {
             english_translation: english_translation || ''
         };
         
+        // Cleanup temp file
+        if (request.temp_file_path && fs.existsSync(request.temp_file_path)) {
+            fs.unlinkSync(request.temp_file_path);
+        }
+        
         res.json({ success: true });
-
     } catch (error) {
         console.error('Result update error:', error);
         res.status(500).json({ 
@@ -298,23 +381,32 @@ app.post('/api/translate/result', express.json(), (req, res) => {
     }
 });
 
-// Worker endpoint to get pending translations
-app.get('/api/translate/pending', (req, res) => {
+app.get('/api/translate/status/:requestId', (req, res) => {
     try {
-        const pending = [];
-        requestStores.translation.forEach((req, id) => {
-            if (req.status === 'processing' && req.attempts < 3) {
-                pending.push({
-                    request_id: id,
-                    text_input: req.text_input,
-                    timestamp: req.timestamp,
-                    attempts: req.attempts || 0
-                });
-            }
+        const requestId = req.params.requestId;
+        const request = requestStores.translation.get(requestId);
+
+        if (!request) {
+            return res.status(404).json({ 
+                error: 'Request not found',
+                details: 'Invalid request ID or request expired' 
+            });
+        }
+
+        res.json({
+            status: request.status,
+            request_id: requestId,
+            ...(request.status === 'done' ? {
+                arabic_text: request.result.arabic_text,
+                english_translation: request.result.english_translation
+            } : {
+                message: request.status === 'failed' ? 
+                    'Translation failed after maximum attempts' : 
+                    'Translation in progress'
+            })
         });
-        res.json(pending);
     } catch (error) {
-        console.error('Pending translations error:', error);
+        console.error('Status check error:', error);
         res.status(500).json({ 
             error: 'Internal server error',
             details: error.message 
@@ -338,12 +430,16 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Upload directory: ${config.uploadDir}`);
+    console.log(`Temp directory: ${config.tempDir}`);
     console.log('Available endpoints:');
     console.log('- POST   /api/recognize-place');
+    console.log('- GET    /api/recognize-place/pending');
     console.log('- POST   /api/recognize-place/result');
     console.log('- POST   /api/check-price');
+    console.log('- GET    /api/check-price/pending');
     console.log('- POST   /api/check-price/result');
     console.log('- POST   /api/translate');
-    console.log('- GET    /api/translate/pending (worker only)');
-    console.log('- POST   /api/translate/result (worker only)');
+    console.log('- GET    /api/translate/pending');
+    console.log('- POST   /api/translate/result');
+    console.log('- GET    /api/translate/status/:requestId');
 });

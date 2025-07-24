@@ -71,38 +71,73 @@ void process_translation_task(httplib::Client& cli, const json& task,
 
     std::cout << "Processing translation task " << request_id << "..." << std::endl;
 
-    try {
-        if (!task.contains("text_input") || task["text_input"].is_null()) {
-            std::cerr << "No text input provided" << std::endl;
-            return;
-        }
+    for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+            if (!task.contains("text_input") || task["text_input"].is_null()) {
+                std::cerr << "No text input provided" << std::endl;
+                return;
+            }
 
-        std::string text_input = task["text_input"].get<std::string>();
-        if (text_input.empty()) {
-            std::cerr << "Empty text input" << std::endl;
-            return;
-        }
+            std::string text_input = task["text_input"].get<std::string>();
+            if (text_input.empty()) {
+                std::cerr << "Empty text input" << std::endl;
+                return;
+            }
 
-        // Create a temporary file for the text
-        std::string temp_file_path = downloadsPath + "\\text_" + request_id + ".txt";
-        std::ofstream temp_file(temp_file_path);
-        temp_file << text_input;
-        temp_file.close();
-        
-        std::string command = "py \"" + pythonScriptPath + "\" --text \"" + temp_file_path + "\"";
+            // Create a temporary file for the text with UTF-8 encoding
+            std::string temp_file_path = downloadsPath + "\\text_" + request_id + ".txt";
+            std::ofstream temp_file(temp_file_path, std::ios::binary);
+            temp_file << "\xEF\xBB\xBF"; // UTF-8 BOM
+            temp_file << text_input;
+            temp_file.close();
+            
+            // Modified command to pass text directly if it's short enough
+            std::string command;
+            if (text_input.length() < 8000) { // Command line length limit
+                // Escape quotes for command line
+                std::string escaped_text;
+                for (char c : text_input) {
+                    if (c == '"') escaped_text += "\\\"";
+                    else escaped_text += c;
+                }
+                command = "py \"" + pythonScriptPath + "\" \"" + escaped_text + "\"";
+            } else {
+                command = "py \"" + pythonScriptPath + "\" \"" + temp_file_path + "\"";
+            }
 
-        std::cout << "Executing: " << command << std::endl;
-        std::string output = exec(command.c_str());
+            std::cout << "Executing: " << command << std::endl;
+            std::string output = exec(command.c_str());
 
-        // Clean up temporary file
-        std::remove(temp_file_path.c_str());
+            // Clean up temporary file
+            std::remove(temp_file_path.c_str());
 
-        if (!output.empty()) {
+            if (output.empty()) {
+                std::cerr << "Empty output from translation script (attempt " << (attempt+1) << ")" << std::endl;
+                if (attempt < MAX_RETRIES - 1) {
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                    continue;
+                }
+                return;
+            }
+
             try {
                 auto result = json::parse(output);
                 
                 if (result.contains("error")) {
                     std::cerr << "Translation error: " << result["error"].get<std::string>() << std::endl;
+                    if (attempt < MAX_RETRIES - 1) {
+                        std::this_thread::sleep_for(std::chrono::seconds(1));
+                        continue;
+                    }
+                    return;
+                }
+
+                if (!result.contains("arabic_text") || !result.contains("english_translation")) {
+                    std::cerr << "Invalid response format from translation script" << std::endl;
+                    if (attempt < MAX_RETRIES - 1) {
+                        std::this_thread::sleep_for(std::chrono::seconds(1));
+                        continue;
+                    }
                     return;
                 }
 
@@ -117,21 +152,32 @@ void process_translation_task(httplib::Client& cli, const json& task,
                 
                 if (post_res && post_res->status == 200) {
                     std::cout << "Translation result sent successfully." << std::endl;
+                    return; // Success - exit retry loop
                 } else {
                     std::cerr << "Failed to send translation result." << std::endl;
                     if (post_res) {
                         std::cerr << "HTTP status: " << post_res->status << std::endl;
                     }
+                    if (attempt < MAX_RETRIES - 1) {
+                        std::this_thread::sleep_for(std::chrono::seconds(1));
+                        continue;
+                    }
                 }
             } catch (const std::exception& e) {
                 std::cerr << "Error parsing translation output: " << e.what() << std::endl;
                 std::cerr << "Raw output: " << output << std::endl;
+                if (attempt < MAX_RETRIES - 1) {
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                    continue;
+                }
             }
-        } else {
-            std::cerr << "Empty output from translation script" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Error processing task " << request_id << " (attempt " << (attempt+1) << "): " << e.what() << std::endl;
+            if (attempt < MAX_RETRIES - 1) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                continue;
+            }
         }
-    } catch (const std::exception& e) {
-        std::cerr << "Error processing task " << request_id << ": " << e.what() << std::endl;
     }
 }
 

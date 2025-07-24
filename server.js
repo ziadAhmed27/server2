@@ -263,12 +263,12 @@ app.post('/api/check-price/result', express.json(), (req, res) => {
 });
 
 // ========== Translation Endpoints ==========
-app.post('/api/translate', (req, res) => {
+app.post('/api/translate', async (req, res) => {
     try {
         // Check if request has file (multipart/form-data) or raw JSON (application/json)
         if (req.headers['content-type']?.startsWith('multipart/form-data')) {
             // Handle file upload
-            upload.single('file')(req, res, (err) => {
+            upload.single('file')(req, res, async (err) => {
                 if (err) {
                     return res.status(400).json({ 
                         error: 'File upload error',
@@ -298,15 +298,10 @@ app.post('/api/translate', (req, res) => {
                     result: null,
                     timestamp: Date.now(),
                     input_type: req.file.mimetype === 'application/json' ? 'json_file' : 'image_file',
-                    response_sent: false
+                    response: res // Store the response object
                 });
 
-                res.json({
-                    status: 'pending',
-                    request_id: requestId,
-                    file_url: fileUrl,
-                    message: 'Translation request accepted'
-                });
+                // Don't respond yet - we'll respond when processing is complete
             });
         } else {
             // Handle raw JSON input
@@ -330,14 +325,10 @@ app.post('/api/translate', (req, res) => {
                 timestamp: Date.now(),
                 input_type: 'raw_text',
                 arabic_text: arabic_text,
-                response_sent: false
+                response: res // Store the response object
             });
 
-            res.json({
-                status: 'pending',
-                request_id: requestId,
-                message: 'Translation request accepted'
-            });
+            // Don't respond yet - we'll respond when processing is complete
         }
     } catch (error) {
         console.error('Translation request error:', error);
@@ -390,7 +381,15 @@ app.post('/api/translate/complete', express.json(), (req, res) => {
             arabic_text: arabic_text || request.arabic_text || '',
             english_translation: english_translation || ''
         };
-        request.response_sent = true;
+
+        // Send the response to the original request
+        request.response.json({
+            status: 'completed',
+            request_id: request_id,
+            arabic_text: request.result.arabic_text,
+            english_translation: request.result.english_translation,
+            input_type: request.input_type
+        });
 
         // Cleanup files if they exist
         if (request.file_path && fs.existsSync(request.file_path)) {
@@ -400,7 +399,8 @@ app.post('/api/translate/complete', express.json(), (req, res) => {
             fs.unlinkSync(request.processing_path);
         }
 
-        res.json({ success: true });
+        // Remove from store
+        requestStores.translation.delete(request_id);
     } catch (error) {
         console.error('Translation complete error:', error);
         res.status(500).json({ 

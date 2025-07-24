@@ -19,32 +19,6 @@ def initialize_ocr():
         verbose=False
     )
 
-def needs_preprocessing(image_path):
-    """Quick check if image needs preprocessing"""
-    try:
-        img = cv2.imread(image_path)
-        if img is None:
-            return False
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        return cv2.mean(gray)[0] < 180 or gray.std() < 50
-    except:
-        return False
-
-def smart_preprocess(image_path):
-    """Fast preprocessing with essential steps only"""
-    try:
-        img = cv2.imread(image_path)
-        if img is None:
-            return None
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        if cv2.mean(gray)[0] < 180:
-            gray = cv2.equalizeHist(gray)
-        if gray.std() < 50:
-            gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(gray)
-        return gray
-    except:
-        return None
-
 def clean_arabic(text):
     """Optimized Arabic text cleaning"""
     if not text:
@@ -61,18 +35,19 @@ def clean_arabic(text):
     text = re.sub(r'[^\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\s.,،:;؟!()0-9]', '', text)
     return re.sub(r'\s+', ' ', text).strip()
 
-def extract_text(reader, image_data):
+def extract_text(reader, image_path):
     """Fast text extraction with EasyOCR"""
     try:
         results = reader.readtext(
-            image_data,
+            image_path,
             batch_size=16,
             text_threshold=0.5,
             link_threshold=0.4,
             paragraph=True
         )
         return " ".join([res[1] for res in results if res[2] > 0.4])
-    except:
+    except Exception as e:
+        print(f"OCR error: {e}", file=sys.stderr)
         return ""
 
 def translate_text(text):
@@ -86,29 +61,13 @@ def translate_text(text):
         for chunk in chunks:
             try:
                 translated.append(GoogleTranslator(source='ar', target='en').translate(chunk))
-            except:
+            except Exception as e:
+                print(f"Translation chunk error: {e}", file=sys.stderr)
                 translated.append(chunk)
         return " ".join(translated)
     except Exception as e:
         print(f"Translation error: {e}", file=sys.stderr)
         return ""
-
-def process_image(reader, image_path):
-    """Process image file and return extracted text"""
-    if not needs_preprocessing(image_path):
-        img_data = cv2.imread(image_path)
-        arabic_text = extract_text(reader, img_data)
-    else:
-        processed = smart_preprocess(image_path)
-        if processed is not None:
-            arabic_text = extract_text(reader, processed)
-    
-    if not arabic_text.strip():
-        img_data = cv2.imread(image_path) if not needs_preprocessing(image_path) else smart_preprocess(image_path)
-        if img_data is not None:
-            arabic_text = pytesseract.image_to_string(img_data, lang='ara', config='--psm 6 --oem 3')
-    
-    return clean_arabic(arabic_text)
 
 def process_json(json_path):
     """Process JSON file and return text"""
@@ -126,33 +85,37 @@ def main(input_path):
     if input_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
         try:
             reader = initialize_ocr()
+            arabic_text = extract_text(reader, input_path)
+            if not arabic_text.strip():
+                # Fallback to Tesseract if EasyOCR fails
+                try:
+                    img = cv2.imread(input_path)
+                    arabic_text = pytesseract.image_to_string(img, lang='ara')
+                except:
+                    pass
         except Exception as e:
-            print(f"OCR initialization error: {e}", file=sys.stderr)
             return json.dumps({
                 "arabic_text": "",
                 "english_translation": "",
                 "error": f"OCR initialization failed: {str(e)}"
             })
-    
-    # Process input based on file type
-    if input_path.lower().endswith('.json'):
+    elif input_path.lower().endswith('.json'):
         arabic_text = process_json(input_path)
     else:
-        if not os.path.exists(input_path):
-            return json.dumps({
-                "arabic_text": "",
-                "english_translation": "",
-                "error": "File not found"
-            })
-        arabic_text = process_image(reader, input_path)
-    
+        return json.dumps({
+            "arabic_text": "",
+            "english_translation": "",
+            "error": "Unsupported file type"
+        })
+
+    arabic_text = clean_arabic(arabic_text)
     if not arabic_text.strip():
         return json.dumps({
             "arabic_text": "",
             "english_translation": "",
-            "error": "No valid Arabic text could be extracted"
+            "error": "No Arabic text could be extracted"
         })
-    
+
     # Translate
     translation = translate_text(arabic_text)
     

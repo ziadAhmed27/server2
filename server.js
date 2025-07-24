@@ -254,90 +254,100 @@ app.post('/api/check-price/result', (req, res) => {
 });
 
 // ========== Translation Endpoints ==========
-app.post('/api/translate', async (req, res) => {
+app.post('/api/translate', express.json(), async (req, res) => {
     try {
+        // Validate request content type
+        if (!req.is('application/json')) {
+            return res.status(400).json({ error: 'Content-Type must be application/json' });
+        }
+
         const requestId = uuidv4();
         const { text } = req.body;
 
-        if (!text) {
-            return res.status(400).json({ error: 'No text provided' });
+        // Validate text input
+        if (!text || typeof text !== 'string' || text.trim().length === 0) {
+            return res.status(400).json({ error: 'No text provided or text is empty' });
         }
 
+        // Create translation request
         translationRequests[requestId] = {
-            text_input: text,
+            text_input: text.trim(),
             status: 'processing',
             result: null,
             timestamp: Date.now()
         };
 
-        const startTime = Date.now();
-        const checkInterval = 500; // ms
-        
-        while (true) {
-            await new Promise(resolve => setTimeout(resolve, checkInterval));
-            
-            const request = translationRequests[requestId];
-            
-            if (request.status === 'done') {
-                return res.json({
-                    status: 'success',
-                    request_id: requestId,
-                    ...request.result
-                });
-            }
-            
-            if (Date.now() - startTime > config.requestTimeout) {
-                request.status = 'timeout';
-                return res.status(504).json({
-                    status: 'timeout',
-                    request_id: requestId,
-                    message: 'Processing took too long'
-                });
-            }
-        }
+        // Immediate response with request ID
+        res.json({
+            status: 'processing',
+            request_id: requestId,
+            message: 'Translation request accepted'
+        });
+
     } catch (error) {
         console.error('Translation error:', error);
-        res.status(500).json({ error: 'Internal server error', details: error.message });
+        res.status(500).json({ 
+            error: 'Internal server error',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 
-app.get('/api/translate/pending', (req, res) => {
+// Status check endpoint
+app.get('/api/translate/status/:requestId', (req, res) => {
     try {
-        const pending = Object.entries(translationRequests)
-            .filter(([, req]) => req.status === 'processing')
-            .map(([id, req]) => ({
-                request_id: id,
-                text_input: req.text_input,
-                timestamp: req.timestamp
-            }));
-        res.json(pending);
+        const requestId = req.params.requestId;
+        const request = translationRequests[requestId];
+
+        if (!request) {
+            return res.status(404).json({ error: 'Request not found' });
+        }
+
+        if (request.status === 'done') {
+            res.json({
+                status: 'success',
+                request_id: requestId,
+                arabic_text: request.result.arabic_text,
+                english_translation: request.result.english_translation
+            });
+        } else {
+            res.json({
+                status: 'processing',
+                request_id: requestId,
+                message: 'Translation in progress'
+            });
+        }
     } catch (error) {
-        console.error('Error getting pending translation requests:', error);
+        console.error('Status check error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-app.post('/api/translate/result', (req, res) => {
+// Result submission endpoint (for worker)
+app.post('/api/translate/result', express.json(), (req, res) => {
     try {
         const { request_id, arabic_text, english_translation } = req.body;
-        
+
+        // Validate input
         if (!request_id || !arabic_text || !translationRequests[request_id]) {
-            return res.status(400).json({ error: 'Invalid request' });
+            return res.status(400).json({ 
+                error: 'Invalid request_id or missing translation results' 
+            });
         }
 
+        // Update request with results
         translationRequests[request_id].status = 'done';
         translationRequests[request_id].result = {
             arabic_text: arabic_text,
             english_translation: english_translation || ''
         };
-        
+
         res.json({ success: true });
     } catch (error) {
         console.error('Error updating translation result:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
-
 // Cleanup old requests
 setInterval(cleanupOldRequests, config.cleanupInterval);
 

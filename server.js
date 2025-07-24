@@ -9,35 +9,93 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Configuration
+const config = {
+    uploadDir: path.join(__dirname, 'uploads'),
+    requestTimeout: 30000, // 30 seconds
+    cleanupInterval: 3600000, // 1 hour
+    maxFileSize: 5 * 1024 * 1024, // 5MB
+    allowedFileTypes: ['image/jpeg', 'image/png', 'image/webp']
+};
+
+// Ensure upload directory exists
+if (!fs.existsSync(config.uploadDir)) {
+    fs.mkdirSync(config.uploadDir, { recursive: true });
+}
+
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(config.uploadDir));
 
-// Configure upload storage
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
-
+// Configure upload storage with file validation
 const storage = multer.diskStorage({
-    destination: uploadDir,
+    destination: config.uploadDir,
     filename: (req, file, cb) => {
         const ext = path.extname(file.originalname) || '.jpg';
         cb(null, `${uuidv4()}${ext}`);
     }
 });
-const upload = multer({ storage });
+
+const fileFilter = (req, file, cb) => {
+    if (config.allowedFileTypes.includes(file.mimetype)) {
+        cb(null, true);
+    } else {
+        cb(new Error('Invalid file type'), false);
+    }
+};
+
+const upload = multer({
+    storage,
+    fileFilter,
+    limits: {
+        fileSize: config.maxFileSize
+    }
+});
 
 // Request tracking
 const placeRequests = {};
 const priceRequests = {};
+const translationRequests = {};
 
-// Place Recognition Endpoints
+// Helper functions
+const validateRequest = (req, res, requiredFields = []) => {
+    for (const field of requiredFields) {
+        if (!req.body[field]) {
+            return res.status(400).json({ error: `Missing required field: ${field}` });
+        }
+    }
+    return null;
+};
+
+const cleanupOldRequests = () => {
+    const now = Date.now();
+    
+    const cleanup = (requests) => {
+        for (const [id, req] of Object.entries(requests)) {
+            if (now - req.timestamp > config.cleanupInterval) {
+                try {
+                    if (req.image_path && fs.existsSync(req.image_path)) {
+                        fs.unlinkSync(req.image_path);
+                    }
+                    delete requests[id];
+                } catch (err) {
+                    console.error('Cleanup error:', err);
+                }
+            }
+        }
+    };
+
+    cleanup(placeRequests);
+    cleanup(priceRequests);
+    cleanup(translationRequests);
+};
+
+// ========== Place Recognition Endpoints ==========
 app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ error: 'No image provided' });
+            return res.status(400).json({ error: 'No image provided or invalid image format' });
         }
 
         const requestId = uuidv4();
@@ -51,12 +109,11 @@ app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
             timestamp: Date.now()
         };
 
-        // Wait for processing with timeout (30 seconds)
+        // Wait for processing with timeout
         const startTime = Date.now();
-        const timeout = 30000;
         
         while (placeRequests[requestId].status === 'processing' && 
-               Date.now() - startTime < timeout) {
+               Date.now() - startTime < config.requestTimeout) {
             await new Promise(resolve => setTimeout(resolve, 500));
         }
 
@@ -68,6 +125,7 @@ app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
                 image_url: imageUrl
             });
         } else {
+            placeRequests[requestId].status = 'timeout';
             res.status(504).json({
                 status: 'timeout',
                 request_id: requestId,
@@ -76,39 +134,49 @@ app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
         }
     } catch (error) {
         console.error('Error processing place recognition:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: 'Internal server error', details: error.message });
     }
 });
 
 app.get('/api/recognize-place/pending', (req, res) => {
-    const pending = Object.entries(placeRequests)
-        .filter(([, req]) => req.status === 'processing')
-        .map(([id, req]) => ({
-            request_id: id,
-            image_url: req.image_url,
-            timestamp: req.timestamp
-        }));
-    res.json(pending);
+    try {
+        const pending = Object.entries(placeRequests)
+            .filter(([, req]) => req.status === 'processing')
+            .map(([id, req]) => ({
+                request_id: id,
+                image_url: req.image_url,
+                timestamp: req.timestamp
+            }));
+        res.json(pending);
+    } catch (error) {
+        console.error('Error getting pending place requests:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 app.post('/api/recognize-place/result', (req, res) => {
-    const { request_id, label } = req.body;
-    
-    if (!request_id || !label || !placeRequests[request_id]) {
-        return res.status(400).json({ error: 'Invalid request_id or label' });
-    }
+    try {
+        const { request_id, label } = req.body;
+        
+        if (!request_id || !label || !placeRequests[request_id]) {
+            return res.status(400).json({ error: 'Invalid request_id or label' });
+        }
 
-    placeRequests[request_id].status = 'done';
-    placeRequests[request_id].label = label;
-    
-    res.json({ success: true });
+        placeRequests[request_id].status = 'done';
+        placeRequests[request_id].label = label;
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error updating place recognition result:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
-// Price Check Endpoints
+// ========== Price Check Endpoints ==========
 app.post('/api/check-price', upload.single('image'), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ error: 'No image provided' });
+            return res.status(400).json({ error: 'No image provided or invalid image format' });
         }
 
         const requestId = uuidv4();
@@ -122,12 +190,11 @@ app.post('/api/check-price', upload.single('image'), async (req, res) => {
             timestamp: Date.now()
         };
 
-        // Wait for processing with timeout (30 seconds)
+        // Wait for processing with timeout
         const startTime = Date.now();
-        const timeout = 30000;
         
         while (priceRequests[requestId].status === 'processing' && 
-               Date.now() - startTime < timeout) {
+               Date.now() - startTime < config.requestTimeout) {
             await new Promise(resolve => setTimeout(resolve, 500));
         }
 
@@ -139,6 +206,7 @@ app.post('/api/check-price', upload.single('image'), async (req, res) => {
                 image_url: imageUrl
             });
         } else {
+            priceRequests[requestId].status = 'timeout';
             res.status(504).json({
                 status: 'timeout',
                 request_id: requestId,
@@ -147,61 +215,146 @@ app.post('/api/check-price', upload.single('image'), async (req, res) => {
         }
     } catch (error) {
         console.error('Error processing price check:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: 'Internal server error', details: error.message });
     }
 });
 
 app.get('/api/check-price/pending', (req, res) => {
-    const pending = Object.entries(priceRequests)
-        .filter(([, req]) => req.status === 'processing')
-        .map(([id, req]) => ({
-            request_id: id,
-            image_url: req.image_url,
-            timestamp: req.timestamp
-        }));
-    res.json(pending);
+    try {
+        const pending = Object.entries(priceRequests)
+            .filter(([, req]) => req.status === 'processing')
+            .map(([id, req]) => ({
+                request_id: id,
+                image_url: req.image_url,
+                timestamp: req.timestamp
+            }));
+        res.json(pending);
+    } catch (error) {
+        console.error('Error getting pending price requests:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 app.post('/api/check-price/result', (req, res) => {
-    const { request_id, result } = req.body;
-    
-    if (!request_id || !result || !priceRequests[request_id]) {
-        return res.status(400).json({ error: 'Invalid request_id or result' });
-    }
+    try {
+        const { request_id, result } = req.body;
+        
+        if (!request_id || !result || !priceRequests[request_id]) {
+            return res.status(400).json({ error: 'Invalid request_id or result' });
+        }
 
-    priceRequests[request_id].status = 'done';
-    priceRequests[request_id].result = result;
-    
-    res.json({ success: true });
+        priceRequests[request_id].status = 'done';
+        priceRequests[request_id].result = result;
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error updating price check result:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ========== Translation Endpoints ==========
+app.post('/api/translate', upload.single('image'), async (req, res) => {
+    try {
+        const requestId = uuidv4();
+        let imageUrl = null;
+        let textInput = req.body.text;
+
+        if (req.file) {
+            imageUrl = `/uploads/${req.file.filename}`;
+            translationRequests[requestId] = {
+                image_path: req.file.path,
+                image_url: imageUrl,
+                text_input: null,
+                status: 'processing',
+                result: null,
+                timestamp: Date.now()
+            };
+        } else if (textInput) {
+            translationRequests[requestId] = {
+                image_path: null,
+                image_url: null,
+                text_input: textInput,
+                status: 'processing',
+                result: null,
+                timestamp: Date.now()
+            };
+        } else {
+            return res.status(400).json({ error: 'No image or text provided' });
+        }
+
+        // Wait for processing with timeout
+        const startTime = Date.now();
+        
+        while (translationRequests[requestId].status === 'processing' && 
+               Date.now() - startTime < config.requestTimeout) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        if (translationRequests[requestId].status === 'done') {
+            res.json({
+                status: 'success',
+                request_id: requestId,
+                ...translationRequests[requestId].result,
+                image_url: imageUrl
+            });
+        } else {
+            translationRequests[requestId].status = 'timeout';
+            res.status(504).json({
+                status: 'timeout',
+                request_id: requestId,
+                message: 'Processing took too long'
+            });
+        }
+    } catch (error) {
+        console.error('Translation error:', error);
+        res.status(500).json({ error: 'Internal server error', details: error.message });
+    }
+});
+
+app.get('/api/translate/pending', (req, res) => {
+    try {
+        const pending = Object.entries(translationRequests)
+            .filter(([, req]) => req.status === 'processing')
+            .map(([id, req]) => ({
+                request_id: id,
+                image_url: req.image_url,
+                text_input: req.text_input,
+                timestamp: req.timestamp
+            }));
+        res.json(pending);
+    } catch (error) {
+        console.error('Error getting pending translation requests:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/api/translate/result', (req, res) => {
+    try {
+        const { request_id, arabic_text, english_translation } = req.body;
+        
+        if (!request_id || (!arabic_text && !english_translation) || !translationRequests[request_id]) {
+            return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        translationRequests[request_id].status = 'done';
+        translationRequests[request_id].result = {
+            arabic_text: arabic_text || '',
+            english_translation: english_translation || ''
+        };
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error updating translation result:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 // Cleanup old requests
-setInterval(() => {
-    const now = Date.now();
-    for (const [id, req] of Object.entries(placeRequests)) {
-        if (now - req.timestamp > 3600000) { // 1 hour
-            try {
-                fs.unlinkSync(req.image_path);
-                delete placeRequests[id];
-            } catch (err) {
-                console.error('Error cleaning up place request:', err);
-            }
-        }
-    }
-    for (const [id, req] of Object.entries(priceRequests)) {
-        if (now - req.timestamp > 3600000) { // 1 hour
-            try {
-                fs.unlinkSync(req.image_path);
-                delete priceRequests[id];
-            } catch (err) {
-                console.error('Error cleaning up price request:', err);
-            }
-        }
-    }
-}, 3600000);
+setInterval(cleanupOldRequests, config.cleanupInterval);
 
 // Start server
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
-    console.log(`Upload directory: ${uploadDir}`);
+    console.log(`Upload directory: ${config.uploadDir}`);
 });

@@ -297,7 +297,8 @@ app.post('/api/translate', (req, res) => {
                     status: 'pending',
                     result: null,
                     timestamp: Date.now(),
-                    input_type: req.file.mimetype === 'application/json' ? 'json_file' : 'image_file'
+                    input_type: req.file.mimetype === 'application/json' ? 'json_file' : 'image_file',
+                    response_sent: false
                 });
 
                 res.json({
@@ -328,7 +329,8 @@ app.post('/api/translate', (req, res) => {
                 result: null,
                 timestamp: Date.now(),
                 input_type: 'raw_text',
-                arabic_text: arabic_text
+                arabic_text: arabic_text,
+                response_sent: false
             });
 
             res.json({
@@ -350,13 +352,14 @@ app.get('/api/translate/pending', (req, res) => {
     try {
         const pending = [];
         requestStores.translation.forEach((req, id) => {
-            if (req.status === 'pending') {
+            if (req.status === 'pending' && !req.response_sent) {
                 pending.push({
                     request_id: id,
                     file_url: req.file_url,
                     processing_path: req.processing_path,
                     timestamp: req.timestamp,
-                    input_type: req.input_type
+                    input_type: req.input_type,
+                    arabic_text: req.arabic_text
                 });
             }
         });
@@ -387,6 +390,7 @@ app.post('/api/translate/complete', express.json(), (req, res) => {
             arabic_text: arabic_text || request.arabic_text || '',
             english_translation: english_translation || ''
         };
+        request.response_sent = true;
 
         // Cleanup files if they exist
         if (request.file_path && fs.existsSync(request.file_path)) {

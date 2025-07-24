@@ -56,24 +56,32 @@ bool DownloadFile(const std::string& url, const std::string& outputPath) {
     return res && res->status == 200;
 }
 
-// Make HTTP GET request
-std::string HttpGet(const std::string& path) {
+// Make HTTP GET request with JSON response
+json HttpGetJson(const std::string& path) {
     httplib::Client cli(SERVER_HOST, SERVER_PORT);
     auto res = cli.Get(path);
     if (res && res->status == 200) {
-        return res->body;
+        try {
+            return json::parse(res->body);
+        } catch (...) {
+            return nullptr;
+        }
     }
-    return "";
+    return nullptr;
 }
 
 // Make HTTP POST request with JSON
-std::string HttpPostJson(const std::string& path, const json& data) {
+json HttpPostJson(const std::string& path, const json& data) {
     httplib::Client cli(SERVER_HOST, SERVER_PORT);
     auto res = cli.Post(path, data.dump(), "application/json");
     if (res && res->status == 200) {
-        return res->body;
+        try {
+            return json::parse(res->body);
+        } catch (...) {
+            return nullptr;
+        }
     }
-    return "";
+    return nullptr;
 }
 
 // Run Python script and get output
@@ -94,18 +102,40 @@ std::string RunPythonScript(const std::string& scriptPath, const std::string& in
 }
 
 // Process a translation request
-void ProcessRequest(const std::string& requestId, const std::string& fileUrl, const std::string& processingPath) {
+void ProcessRequest(const json& request) {
     try {
+        std::string requestId = request["request_id"];
+        std::string inputType = request["input_type"];
+        
         // Create downloads directory if it doesn't exist
         if (!fs::exists(DOWNLOAD_DIR)) {
             fs::create_directory(DOWNLOAD_DIR);
         }
 
-        // Download the file
-        std::string filePath = DOWNLOAD_DIR + "/" + requestId + (processingPath.find(".json") != std::string::npos ? ".json" : ".jpg");
-        if (!DownloadFile(fileUrl, filePath)) {
-            std::cerr << "Failed to download file: " << fileUrl << std::endl;
-            return;
+        std::string filePath;
+        std::string arabicText;
+
+        if (inputType == "raw_text") {
+            // For raw text requests, just use the text directly
+            arabicText = request["arabic_text"];
+        } else {
+            // For file requests, download the file
+            std::string fileUrl = request["file_url"];
+            std::string ext = (inputType == "json_file") ? ".json" : ".jpg";
+            filePath = DOWNLOAD_DIR + "/" + requestId + ext;
+            
+            if (!DownloadFile(fileUrl, filePath)) {
+                std::cerr << "Failed to download file: " << fileUrl << std::endl;
+                return;
+            }
+        }
+
+        // Prepare input for Python script
+        if (inputType == "raw_text") {
+            // Create a temporary JSON file for raw text
+            filePath = DOWNLOAD_DIR + "/" + requestId + ".json";
+            json tempJson = {{"arabic_text", arabicText}};
+            std::ofstream(filePath) << tempJson.dump();
         }
 
         // Run Python translation
@@ -127,13 +157,15 @@ void ProcessRequest(const std::string& requestId, const std::string& fileUrl, co
             {"english_translation", result.value("english_translation", "")}
         };
 
-        std::string completeResponse = HttpPostJson("/api/translate/complete", completeData);
-        std::cout << "Completed request " << requestId << " with response: " << completeResponse << std::endl;
+        json completeResponse = HttpPostJson("/api/translate/complete", completeData);
+        std::cout << "Completed request " << requestId << std::endl;
 
         // Clean up downloaded file
-        fs::remove(filePath);
+        if (fs::exists(filePath)) {
+            fs::remove(filePath);
+        }
     } catch (const std::exception& e) {
-        std::cerr << "Error processing request " << requestId << ": " << e.what() << std::endl;
+        std::cerr << "Error processing request: " << e.what() << std::endl;
     }
 }
 
@@ -144,23 +176,13 @@ int main() {
     while (true) {
         try {
             // Check for pending translation requests
-            std::string pendingResponse = HttpGet("/api/translate/pending");
+            json pendingRequests = HttpGetJson("/api/translate/pending");
             
-            try {
-                json pendingRequests = json::parse(pendingResponse);
-                
-                if (pendingRequests.is_array() && !pendingRequests.empty()) {
-                    for (const auto& req : pendingRequests) {
-                        std::string requestId = req["request_id"];
-                        std::string fileUrl = req["file_url"];
-                        std::string processingPath = req["processing_path"];
-                        
-                        std::cout << "Processing request: " << requestId << std::endl;
-                        ProcessRequest(requestId, fileUrl, processingPath);
-                    }
+            if (pendingRequests.is_array() && !pendingRequests.empty()) {
+                for (const auto& req : pendingRequests) {
+                    std::cout << "Processing request: " << req["request_id"] << std::endl;
+                    ProcessRequest(req);
                 }
-            } catch (const std::exception& e) {
-                std::cerr << "Error parsing pending requests: " << e.what() << std::endl;
             }
         } catch (const std::exception& e) {
             std::cerr << "Error in main loop: " << e.what() << std::endl;

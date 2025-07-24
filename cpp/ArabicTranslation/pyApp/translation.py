@@ -12,7 +12,7 @@ def initialize_ocr():
     """Initialize OCR engine with optimized settings"""
     return easyocr.Reader(
         ['ar'],
-        gpu=True,  # Always try to use GPU if available
+        gpu=True,
         quantize=True,
         model_storage_directory=None,
         download_enabled=True,
@@ -90,13 +90,11 @@ def translate_text(text):
                 translated.append(chunk)
         return " ".join(translated)
     except Exception as e:
-        print(f"Translation error: {e}")
+        print(f"Translation error: {e}", file=sys.stderr)
         return ""
 
 def process_image(reader, image_path):
     """Process image file and return extracted text"""
-    start_time = time()
-    
     if not needs_preprocessing(image_path):
         img_data = cv2.imread(image_path)
         arabic_text = extract_text(reader, img_data)
@@ -110,65 +108,60 @@ def process_image(reader, image_path):
         if img_data is not None:
             arabic_text = pytesseract.image_to_string(img_data, lang='ara', config='--psm 6 --oem 3')
     
-    arabic_text = clean_arabic(arabic_text)
-    print(f"Text extraction completed in {time()-start_time:.2f} seconds")
-    return arabic_text
+    return clean_arabic(arabic_text)
 
 def process_json(json_path):
     """Process JSON file and return text"""
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        return clean_arabic(data.get('text', ''))
+        return clean_arabic(data.get('arabic_text', data.get('text', '')))
     except Exception as e:
-        print(f"Error reading JSON file: {e}")
+        print(f"Error reading JSON file: {e}", file=sys.stderr)
         return ""
 
 def main(input_path):
-    print("\n=== Arabic Text Translator ===")
-    
     # Initialize OCR only if needed (for image processing)
     reader = None
     if input_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
         try:
             reader = initialize_ocr()
         except Exception as e:
-            print(f"OCR initialization error: {e}")
-            return
-    
-    start_time = time()
+            print(f"OCR initialization error: {e}", file=sys.stderr)
+            return json.dumps({
+                "arabic_text": "",
+                "english_translation": "",
+                "error": f"OCR initialization failed: {str(e)}"
+            })
     
     # Process input based on file type
     if input_path.lower().endswith('.json'):
         arabic_text = process_json(input_path)
     else:
         if not os.path.exists(input_path):
-            print("\nError: File not found")
-            return
+            return json.dumps({
+                "arabic_text": "",
+                "english_translation": "",
+                "error": "File not found"
+            })
         arabic_text = process_image(reader, input_path)
     
     if not arabic_text.strip():
-        print("\nError: No valid Arabic text could be extracted")
-        return
-    
-    print("\n=== Extracted Arabic Text ===")
-    print(arabic_text)
+        return json.dumps({
+            "arabic_text": "",
+            "english_translation": "",
+            "error": "No valid Arabic text could be extracted"
+        })
     
     # Translate
-    print("\nTranslating...")
     translation = translate_text(arabic_text)
     
-    if translation.strip():
-        print("\n=== English Translation ===")
-        print(translation)
-        
-        with open("translation_result.txt", "w", encoding="utf-8") as f:
-            f.write(f"Arabic Text:\n{arabic_text}\n\nEnglish Translation:\n{translation}")
-        print("\nResults saved to 'translation_result.txt'")
-    else:
-        print("\nWarning: Translation returned empty result")
-    
-    print(f"\nTotal processing time: {time()-start_time:.2f} seconds")
+    # Return as JSON
+    return json.dumps({
+        "arabic_text": arabic_text,
+        "english_translation": translation,
+        "error": ""
+    })
 
 if __name__ == "__main__":
     # Configure Tesseract path if not in system PATH
@@ -180,7 +173,20 @@ if __name__ == "__main__":
             pytesseract.pytesseract.tesseract_cmd = tesseract_path
     
     if len(sys.argv) != 2:
-        print("Usage: python translation.py <path_to_image_or_json>")
+        print(json.dumps({
+            "arabic_text": "",
+            "english_translation": "",
+            "error": "Usage: python translation.py <path_to_image_or_json>"
+        }))
         sys.exit(1)
     
-    main(sys.argv[1])
+    try:
+        result = main(sys.argv[1])
+        print(result)
+    except Exception as e:
+        print(json.dumps({
+            "arabic_text": "",
+            "english_translation": "",
+            "error": f"Processing error: {str(e)}"
+        }))
+        sys.exit(1)

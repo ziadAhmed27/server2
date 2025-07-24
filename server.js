@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 // Configuration
 const config = {
     uploadDir: path.join(__dirname, 'uploads'),
-    requestTimeout: 30000, // 30 seconds
+    requestTimeout: 60000, // 30 seconds
     cleanupInterval: 3600000, // 1 hour
     maxFileSize: 5 * 1024 * 1024, // 5MB
     allowedFileTypes: ['image/jpeg', 'image/png', 'image/webp']
@@ -260,28 +260,23 @@ app.post('/api/translate', upload.single('image'), async (req, res) => {
         let imageUrl = null;
         let textInput = req.body.text;
 
-        if (req.file) {
-            imageUrl = `/uploads/${req.file.filename}`;
-            translationRequests[requestId] = {
-                image_path: req.file.path,
-                image_url: imageUrl,
-                text_input: null,
-                status: 'processing',
-                result: null,
-                timestamp: Date.now()
-            };
-        } else if (textInput) {
-            translationRequests[requestId] = {
-                image_path: null,
-                image_url: null,
-                text_input: textInput,
-                status: 'processing',
-                result: null,
-                timestamp: Date.now()
-            };
-        } else {
+        // Validate input
+        if (!req.file && !textInput) {
             return res.status(400).json({ error: 'No image or text provided' });
         }
+
+        if (req.file) {
+            imageUrl = `/uploads/${req.file.filename}`;
+        }
+
+        translationRequests[requestId] = {
+            image_path: req.file?.path || null,
+            image_url: imageUrl,
+            text_input: textInput || null,
+            status: 'processing',
+            result: null,
+            timestamp: Date.now()
+        };
 
         // Wait for processing with timeout
         const startTime = Date.now();
@@ -292,12 +287,17 @@ app.post('/api/translate', upload.single('image'), async (req, res) => {
         }
 
         if (translationRequests[requestId].status === 'done') {
-            res.json({
+            const response = {
                 status: 'success',
                 request_id: requestId,
-                ...translationRequests[requestId].result,
-                image_url: imageUrl
-            });
+                ...translationRequests[requestId].result
+            };
+            
+            if (imageUrl) {
+                response.image_url = imageUrl;
+            }
+            
+            res.json(response);
         } else {
             translationRequests[requestId].status = 'timeout';
             res.status(504).json({

@@ -5,6 +5,7 @@ import re
 import pytesseract
 import numpy as np
 import sys
+import json
 from deep_translator import GoogleTranslator
 from time import time
 
@@ -13,7 +14,7 @@ def initialize_ocr():
     try:
         reader = easyocr.Reader(
             ['ar'],
-            gpu=True,  # Always try to use GPU if available
+            gpu=True,
             quantize=True,
             model_storage_directory=None,
             download_enabled=True,
@@ -126,25 +127,6 @@ def translate_text(text):
         print(f"Translation error: {e}")
         return ""
 
-def process_image(image_path, reader):
-    """Process image and return extracted Arabic text"""
-    arabic_text = ""
-    
-    if not needs_preprocessing(image_path):
-        img_data = cv2.imread(image_path)
-        arabic_text = extract_text(reader, img_data)
-    else:
-        processed = smart_preprocess(image_path)
-        if processed is not None:
-            arabic_text = extract_text(reader, processed)
-    
-    if not arabic_text.strip():
-        img_data = cv2.imread(image_path) if not needs_preprocessing(image_path) else smart_preprocess(image_path)
-        if img_data is not None:
-            arabic_text = extract_text(reader, img_data, use_easyocr=False)
-    
-    return clean_arabic(arabic_text)
-
 def main():
     # Configure Tesseract path if not in system PATH
     try:
@@ -154,46 +136,58 @@ def main():
         if os.path.exists(tesseract_path):
             pytesseract.pytesseract.tesseract_cmd = tesseract_path
     
+    # Force UTF-8 output
+    sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
+    
     if len(sys.argv) < 2:
-        print("Usage: python translation.py <path_to_image> or \"arabic text\"")
+        print(json.dumps({"error": "Usage: python translation.py <path_to_image> or \"arabic text\""}))
         return
     
     input_arg = sys.argv[1]
     reader = initialize_ocr()
     if not reader and not pytesseract.get_tesseract_version():
-        print("Error: No working OCR engines available")
+        print(json.dumps({"error": "No working OCR engines available"}))
         return
     
     start_time = time()
+    arabic_text = ""
     
-    # Determine if input is text or image path
+    # Determine if input is text or image
     if os.path.exists(input_arg):
         # Process as image
-        arabic_text = process_image(input_arg, reader)
+        if not needs_preprocessing(input_arg):
+            img_data = cv2.imread(input_arg)
+            arabic_text = extract_text(reader, img_data)
+        else:
+            processed = smart_preprocess(input_arg)
+            if processed is not None:
+                arabic_text = extract_text(reader, processed)
+        
+        # Fallback to Tesseract if needed
         if not arabic_text.strip():
-            print("Error: No valid Arabic text could be extracted from the image")
-            return
+            img_data = cv2.imread(input_arg) if not needs_preprocessing(input_arg) else smart_preprocess(input_arg)
+            if img_data is not None:
+                arabic_text = extract_text(reader, img_data, use_easyocr=False)
     else:
         # Process as direct text input
         arabic_text = clean_arabic(input_arg)
     
-    print("\n=== Extracted Arabic Text ===")
-    print(arabic_text)
+    arabic_text = clean_arabic(arabic_text)
+    if not arabic_text.strip():
+        print(json.dumps({"error": "No valid Arabic text could be extracted"}))
+        return
     
     # Translate
     translation = translate_text(arabic_text)
     
     if translation.strip():
-        print("\n=== English Translation ===")
-        print(translation)
-        
-        with open("translation_result.txt", "w", encoding="utf-8") as f:
-            f.write(f"Arabic Text:\n{arabic_text}\n\nEnglish Translation:\n{translation}")
-        print("\nResults saved to 'translation_result.txt'")
+        result = {
+            "arabic_text": arabic_text,
+            "english_translation": translation
+        }
+        print(json.dumps(result, ensure_ascii=False))
     else:
-        print("\nWarning: Translation returned empty result")
-    
-    print(f"\nProcessing completed in {time()-start_time:.2f} seconds")
+        print(json.dumps({"error": "Translation returned empty result"}))
 
 if __name__ == "__main__":
     main()

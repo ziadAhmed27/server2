@@ -9,6 +9,8 @@
 #include "nlohmann/json.hpp"
 #include <direct.h>
 #include <Windows.h>
+#include <locale>
+#include <codecvt>
 
 using json = nlohmann::json;
 
@@ -56,16 +58,112 @@ bool download_file(httplib::Client& cli, const std::string& url, const std::stri
     return false;
 }
 
-std::string escape_json(const std::string &s) {
-    std::ostringstream o;
-    for (auto c = s.cbegin(); c != s.cend(); c++) {
-        if (*c == '"' || *c == '\\' || ('\x00' <= *c && *c <= '\x1f')) {
-            o << "\\u" << std::hex << std::setw(4) << std::setfill('0') << (int)*c;
-        } else {
-            o << *c;
-        }
+void process_translation_task(httplib::Client& cli, const json& task, 
+                            const std::string& pythonScriptPath,
+                            const std::string& downloadsPath) {
+    std::string request_id;
+    try {
+        request_id = task["request_id"].get<std::string>();
+    } catch (...) {
+        std::cerr << "Invalid task format - missing request_id" << std::endl;
+        return;
     }
-    return o.str();
+
+    std::cout << "Processing translation task " << request_id << "..." << std::endl;
+
+    std::string command;
+    std::string local_path;
+    bool is_image_task = false;
+
+    try {
+        if (task.contains("image_url") && !task["image_url"].is_null()) {
+            // Handle image processing
+            std::string image_url = task["image_url"].get<std::string>();
+            if (!image_url.empty()) {
+                std::string filename = image_url.substr(image_url.find_last_of("/") + 1);
+                local_path = downloadsPath + "\\" + filename;
+
+                // Download with retries
+                bool downloaded = false;
+                for (int i = 0; i < MAX_RETRIES && !downloaded; i++) {
+                    downloaded = download_file(cli, SERVER_BASE_URL + image_url, local_path);
+                    if (!downloaded) {
+                        std::this_thread::sleep_for(std::chrono::seconds(1));
+                    }
+                }
+
+                if (downloaded) {
+                    command = "py \"" + pythonScriptPath + "\" --image \"" + local_path + "\"";
+                    is_image_task = true;
+                } else {
+                    std::cerr << "Failed to download image after " << MAX_RETRIES << " attempts." << std::endl;
+                    return;
+                }
+            }
+        } else if (task.contains("text_input") && !task["text_input"].is_null()) {
+            // Handle text processing
+            std::string text_input = task["text_input"].get<std::string>();
+            if (!text_input.empty()) {
+                // Create a temporary file for the text
+                std::string temp_file_path = downloadsPath + "\\text_" + request_id + ".txt";
+                std::ofstream temp_file(temp_file_path);
+                temp_file << text_input;
+                temp_file.close();
+                
+                command = "py \"" + pythonScriptPath + "\" --text \"" + temp_file_path + "\"";
+                local_path = temp_file_path;
+            }
+        }
+
+        if (command.empty()) {
+            std::cerr << "No valid task data found" << std::endl;
+            return;
+        }
+
+        std::cout << "Executing: " << command << std::endl;
+        std::string output = exec(command.c_str());
+
+        // Clean up temporary files
+        if (!local_path.empty()) {
+            std::remove(local_path.c_str());
+        }
+
+        if (!output.empty()) {
+            try {
+                auto result = json::parse(output);
+                
+                if (result.contains("error")) {
+                    std::cerr << "Translation error: " << result["error"].get<std::string>() << std::endl;
+                    return;
+                }
+
+                json result_payload = {
+                    {"request_id", request_id},
+                    {"arabic_text", result["arabic_text"].get<std::string>()},
+                    {"english_translation", result["english_translation"].get<std::string>()}
+                };
+                
+                auto post_res = cli.Post(RESULT_ENDPOINT.c_str(), 
+                    result_payload.dump(), "application/json");
+                
+                if (post_res && post_res->status == 200) {
+                    std::cout << "Translation result sent successfully." << std::endl;
+                } else {
+                    std::cerr << "Failed to send translation result." << std::endl;
+                    if (post_res) {
+                        std::cerr << "HTTP status: " << post_res->status << std::endl;
+                    }
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "Error parsing translation output: " << e.what() << std::endl;
+                std::cerr << "Raw output: " << output << std::endl;
+            }
+        } else {
+            std::cerr << "Empty output from translation script" << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error processing task " << request_id << ": " << e.what() << std::endl;
+    }
 }
 
 int main() {
@@ -89,90 +187,26 @@ int main() {
             std::cout << "Checking for pending translation tasks..." << std::endl;
             auto res = cli.Get(PENDING_ENDPOINT.c_str());
 
-            if (res && res->status == 200) {
-                try {
-                    json pending_tasks = json::parse(res->body);
+            if (res) {
+                if (res->status == 200) {
+                    try {
+                        json pending_tasks = json::parse(res->body);
 
-                    if (pending_tasks.empty()) {
-                        std::cout << "No pending translation tasks." << std::endl;
-                    } else {
-                        for (const auto& task : pending_tasks) {
-                            std::string request_id = task["request_id"];
-                            std::string image_url = task.value("image_url", "");
-                            std::string text_input = task.value("text_input", "");
-
-                            std::cout << "Processing translation task " << request_id << "..." << std::endl;
-
-                            std::string command;
-                            if (!image_url.empty()) {
-                                std::string filename = image_url.substr(image_url.find_last_of("/") + 1);
-                                std::string local_path = downloadsPath + "\\" + filename;
-
-                                // Download with retries
-                                bool downloaded = false;
-                                for (int i = 0; i < MAX_RETRIES && !downloaded; i++) {
-                                    downloaded = download_file(cli, SERVER_BASE_URL + image_url, local_path);
-                                    if (!downloaded) {
-                                        std::this_thread::sleep_for(std::chrono::seconds(1));
-                                    }
-                                }
-
-                                if (downloaded) {
-                                    command = "python \"" + pythonScriptPath + "\" \"" + local_path + "\"";
-                                    std::remove(local_path.c_str());
-                                } else {
-                                    continue;
-                                }
-                            } else if (!text_input.empty()) {
-                                // Escape text for command line
-                                std::string escaped_text = "\"" + text_input + "\"";
-                                command = "python \"" + pythonScriptPath + "\" " + escaped_text;
-                            } else {
-                                continue;
-                            }
-
-                            std::cout << "Executing: " << command << std::endl;
-                            std::string output = exec(command.c_str());
-
-                            if (!output.empty()) {
-                                try {
-                                    // Parse the output (assuming format: "Arabic Text:\n...\n\nEnglish Translation:\n...")
-                                    size_t arabic_start = output.find("Arabic Text:\n") + 13;
-                                    size_t arabic_end = output.find("\n\nEnglish Translation:");
-                                    size_t english_start = output.find("\n\nEnglish Translation:\n") + 23;
-                                    
-                                    std::string arabic_text = output.substr(arabic_start, arabic_end - arabic_start);
-                                    std::string english_translation = output.substr(english_start);
-                                    
-                                    // Clean up newlines
-                                    arabic_text.erase(std::remove(arabic_text.begin(), arabic_text.end(), '\n'), arabic_text.end());
-                                    english_translation.erase(std::remove(english_translation.begin(), english_translation.end(), '\n'), english_translation.end());
-
-                                    json result_payload = {
-                                        {"request_id", request_id},
-                                        {"arabic_text", arabic_text},
-                                        {"english_translation", english_translation}
-                                    };
-                                    
-                                    auto post_res = cli.Post(RESULT_ENDPOINT.c_str(), 
-                                        result_payload.dump(), "application/json");
-                                    
-                                    if (post_res && post_res->status == 200) {
-                                        std::cout << "Translation result sent successfully." << std::endl;
-                                    } else {
-                                        std::cerr << "Failed to send translation result." << std::endl;
-                                    }
-                                } catch (const std::exception& e) {
-                                    std::cerr << "Error parsing translation output: " << e.what() << std::endl;
-                                }
+                        if (pending_tasks.empty()) {
+                            std::cout << "No pending translation tasks." << std::endl;
+                        } else {
+                            for (const auto& task : pending_tasks) {
+                                process_translation_task(cli, task, pythonScriptPath, downloadsPath);
                             }
                         }
+                    } catch (const json::parse_error& e) {
+                        std::cerr << "JSON parse error: " << e.what() << std::endl;
+                        std::cerr << "Response body: " << res->body << std::endl;
                     }
-                } catch (const json::parse_error& e) {
-                    std::cerr << "JSON parse error: " << e.what() << std::endl;
+                } else {
+                    std::cerr << "Server error: " << res->status << std::endl;
+                    std::cerr << "Response: " << res->body << std::endl;
                 }
-            } else if (res) {
-                std::cerr << "Server error: " << res->status << std::endl;
             } else {
                 std::cerr << "Failed to connect to server." << std::endl;
             }

@@ -254,57 +254,46 @@ app.post('/api/check-price/result', (req, res) => {
 });
 
 // ========== Translation Endpoints ==========
-app.post('/api/translate', upload.single('image'), async (req, res) => {
+app.post('/api/translate', async (req, res) => {
     try {
         const requestId = uuidv4();
-        let imageUrl = null;
-        let textInput = req.body.text;
+        const { text } = req.body;
 
-        // Validate input
-        if (!req.file && !textInput) {
-            return res.status(400).json({ error: 'No image or text provided' });
-        }
-
-        if (req.file) {
-            imageUrl = `/uploads/${req.file.filename}`;
+        if (!text) {
+            return res.status(400).json({ error: 'No text provided' });
         }
 
         translationRequests[requestId] = {
-            image_path: req.file?.path || null,
-            image_url: imageUrl,
-            text_input: textInput || null,
+            text_input: text,
             status: 'processing',
             result: null,
             timestamp: Date.now()
         };
 
-        // Wait for processing with timeout
         const startTime = Date.now();
+        const checkInterval = 500; // ms
         
-        while (translationRequests[requestId].status === 'processing' && 
-               Date.now() - startTime < config.requestTimeout) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-
-        if (translationRequests[requestId].status === 'done') {
-            const response = {
-                status: 'success',
-                request_id: requestId,
-                ...translationRequests[requestId].result
-            };
+        while (true) {
+            await new Promise(resolve => setTimeout(resolve, checkInterval));
             
-            if (imageUrl) {
-                response.image_url = imageUrl;
+            const request = translationRequests[requestId];
+            
+            if (request.status === 'done') {
+                return res.json({
+                    status: 'success',
+                    request_id: requestId,
+                    ...request.result
+                });
             }
             
-            res.json(response);
-        } else {
-            translationRequests[requestId].status = 'timeout';
-            res.status(504).json({
-                status: 'timeout',
-                request_id: requestId,
-                message: 'Processing took too long'
-            });
+            if (Date.now() - startTime > config.requestTimeout) {
+                request.status = 'timeout';
+                return res.status(504).json({
+                    status: 'timeout',
+                    request_id: requestId,
+                    message: 'Processing took too long'
+                });
+            }
         }
     } catch (error) {
         console.error('Translation error:', error);
@@ -318,7 +307,6 @@ app.get('/api/translate/pending', (req, res) => {
             .filter(([, req]) => req.status === 'processing')
             .map(([id, req]) => ({
                 request_id: id,
-                image_url: req.image_url,
                 text_input: req.text_input,
                 timestamp: req.timestamp
             }));
@@ -333,13 +321,13 @@ app.post('/api/translate/result', (req, res) => {
     try {
         const { request_id, arabic_text, english_translation } = req.body;
         
-        if (!request_id || (!arabic_text && !english_translation) || !translationRequests[request_id]) {
+        if (!request_id || !arabic_text || !translationRequests[request_id]) {
             return res.status(400).json({ error: 'Invalid request' });
         }
 
         translationRequests[request_id].status = 'done';
         translationRequests[request_id].result = {
-            arabic_text: arabic_text || '',
+            arabic_text: arabic_text,
             english_translation: english_translation || ''
         };
         

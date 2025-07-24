@@ -71,62 +71,31 @@ void process_translation_task(httplib::Client& cli, const json& task,
 
     std::cout << "Processing translation task " << request_id << "..." << std::endl;
 
-    std::string command;
-    std::string local_path;
-    bool is_image_task = false;
-
     try {
-        if (task.contains("image_url") && !task["image_url"].is_null()) {
-            // Handle image processing
-            std::string image_url = task["image_url"].get<std::string>();
-            if (!image_url.empty()) {
-                std::string filename = image_url.substr(image_url.find_last_of("/") + 1);
-                local_path = downloadsPath + "\\" + filename;
-
-                // Download with retries
-                bool downloaded = false;
-                for (int i = 0; i < MAX_RETRIES && !downloaded; i++) {
-                    downloaded = download_file(cli, SERVER_BASE_URL + image_url, local_path);
-                    if (!downloaded) {
-                        std::this_thread::sleep_for(std::chrono::seconds(1));
-                    }
-                }
-
-                if (downloaded) {
-                    command = "py \"" + pythonScriptPath + "\" --image \"" + local_path + "\"";
-                    is_image_task = true;
-                } else {
-                    std::cerr << "Failed to download image after " << MAX_RETRIES << " attempts." << std::endl;
-                    return;
-                }
-            }
-        } else if (task.contains("text_input") && !task["text_input"].is_null()) {
-            // Handle text processing
-            std::string text_input = task["text_input"].get<std::string>();
-            if (!text_input.empty()) {
-                // Create a temporary file for the text
-                std::string temp_file_path = downloadsPath + "\\text_" + request_id + ".txt";
-                std::ofstream temp_file(temp_file_path);
-                temp_file << text_input;
-                temp_file.close();
-                
-                command = "py \"" + pythonScriptPath + "\" --text \"" + temp_file_path + "\"";
-                local_path = temp_file_path;
-            }
-        }
-
-        if (command.empty()) {
-            std::cerr << "No valid task data found" << std::endl;
+        if (!task.contains("text_input") || task["text_input"].is_null()) {
+            std::cerr << "No text input provided" << std::endl;
             return;
         }
+
+        std::string text_input = task["text_input"].get<std::string>();
+        if (text_input.empty()) {
+            std::cerr << "Empty text input" << std::endl;
+            return;
+        }
+
+        // Create a temporary file for the text
+        std::string temp_file_path = downloadsPath + "\\text_" + request_id + ".txt";
+        std::ofstream temp_file(temp_file_path);
+        temp_file << text_input;
+        temp_file.close();
+        
+        std::string command = "py \"" + pythonScriptPath + "\" --text \"" + temp_file_path + "\"";
 
         std::cout << "Executing: " << command << std::endl;
         std::string output = exec(command.c_str());
 
-        // Clean up temporary files
-        if (!local_path.empty()) {
-            std::remove(local_path.c_str());
-        }
+        // Clean up temporary file
+        std::remove(temp_file_path.c_str());
 
         if (!output.empty()) {
             try {

@@ -5,13 +5,12 @@ const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
-
+const customersRouter = require('./customers');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Enhanced Configuration
 const config = {
-    
     uploadDir: path.join(__dirname, 'uploads'),
     tempDir: path.join(__dirname, 'temp'),
     processingDir: path.join(__dirname, 'processing'),
@@ -20,8 +19,6 @@ const config = {
     maxFileSize: 5 * 1024 * 1024, // 5MB
     allowedFileTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/json'],
     maxRequests: 1000
-
-    
 };
 
 // Ensure directories exist
@@ -45,6 +42,13 @@ app.use('/uploads', express.static(config.uploadDir, {
     },
     fallthrough: false // Don't continue to next middleware if file not found
 }));
+
+app.use('/api/customers', customersRouter);
+
+app.use('/uploads', (err, req, res, next) => {
+    console.error('Static file error:', err);
+    res.status(404).json({ error: 'File not found' });
+});
 
 app.use('/uploads', (err, req, res, next) => {
     console.error('Static file error:', err);
@@ -623,6 +627,8 @@ app.listen(PORT, () => {
     console.log(`Upload directory: ${config.uploadDir}`);
     console.log(`Processing directory: ${config.processingDir}`);
     console.log('Available endpoints:');
+    console.log('- POST   /api/customers/signup');
+    console.log('- POST   /api/customers/signin');
     console.log('- POST   /api/recognize-place');
     console.log('- GET    /api/recognize-place/pending');
     console.log('- POST   /api/recognize-place/result');

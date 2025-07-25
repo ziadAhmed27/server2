@@ -6,6 +6,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const customersRouter = require('./routes/customers');
+const { db, initDb } = require('./database');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -622,6 +623,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
+initDb();
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Upload directory: ${config.uploadDir}`);

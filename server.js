@@ -68,11 +68,28 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-    if (config.allowedFileTypes.includes(file.mimetype)) {
-        cb(null, true);
-    } else {
-        cb(new Error(`Invalid file type. Only ${config.allowedFileTypes.join(', ')} are allowed`), false);
-    }
+    console.log('Incoming file:', {
+    originalname: file.originalname,
+    mimetype: file.mimetype,
+    size: file.size
+  });
+  const allowedTypes = [
+    'image/jpeg', 
+    'image/png', 
+    'image/webp', 
+    'application/json',
+    'image/jpg' // Add this line
+  ];
+  
+  // Also check the extension as fallback
+  const ext = path.extname(file.originalname).toLowerCase();
+  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.json'];
+  
+  if (allowedTypes.includes(file.mimetype) || allowedExtensions.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`Invalid file type. Only ${allowedTypes.join(', ')} are allowed`), false);
+  }
 };
 
 const upload = multer({

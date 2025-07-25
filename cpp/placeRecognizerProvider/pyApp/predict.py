@@ -4,6 +4,7 @@ import torch
 from PIL import Image
 import torchvision.transforms as transforms
 import open_clip
+import re
 
 # Set device
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -66,4 +67,6 @@ top_index = similarity.argmax().item()
 predicted_label = label_names[top_index]
 
 # Output result (label only)
-print(predicted_label)
+cleaned_label = predicted_label.replace('’', "'")  # Replace smart quote with ASCII apostrophe
+cleaned_label = re.sub(r'[^\x00-\x7F]', '', cleaned_label)  # Remove any other non-ASCII chars
+print(cleaned_label)

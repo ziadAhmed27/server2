@@ -11,6 +11,7 @@ const PORT = process.env.PORT || 3000;
 
 // Enhanced Configuration
 const config = {
+    
     uploadDir: path.join(__dirname, 'uploads'),
     tempDir: path.join(__dirname, 'temp'),
     processingDir: path.join(__dirname, 'processing'),
@@ -19,6 +20,8 @@ const config = {
     maxFileSize: 5 * 1024 * 1024, // 5MB
     allowedFileTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/json'],
     maxRequests: 1000
+
+    
 };
 
 // Ensure directories exist
@@ -35,9 +38,18 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(bodyParser.json({ limit: '10mb' }));
-app.use('/uploads', express.static(config.uploadDir));
-app.use('/processing', express.static(config.processingDir));
+app.use('/uploads', express.static(config.uploadDir, {
+    setHeaders: (res, path) => {
+        res.set('Cache-Control', 'public, max-age=300');
+        res.set('X-Content-Type-Options', 'nosniff');
+    },
+    fallthrough: false // Don't continue to next middleware if file not found
+}));
 
+app.use('/uploads', (err, req, res, next) => {
+    console.error('Static file error:', err);
+    res.status(404).json({ error: 'File not found' });
+});
 // Configure upload storage
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -101,16 +113,22 @@ const cleanupOldRequests = () => {
 
     // Cleanup old files in all directories
     [config.uploadDir, config.tempDir, config.processingDir].forEach(dir => {
-        fs.readdir(dir, (err, files) => {
-            if (err) return;
-            files.forEach(file => {
-                const filePath = path.join(dir, file);
-                const stat = fs.statSync(filePath);
-                if (now - stat.mtimeMs > config.cleanupInterval) {
-                    fs.unlinkSync(filePath);
-                }
-            });
-        });
+    if (!fs.existsSync(dir)) return;
+    
+    const files = fs.readdirSync(dir);
+    const now = Date.now();
+    files.forEach(file => {
+        const filePath = path.join(dir, file);
+        try {
+            const stat = fs.statSync(filePath);
+            if (now - stat.mtimeMs > config.cleanupInterval) {
+                fs.unlinkSync(filePath);
+                console.log(`Cleaned up old file: ${filePath}`);
+            }
+        } catch (err) {
+            console.error(`Error cleaning up ${filePath}:`, err);
+           }
+     });
     });
 };
 
@@ -402,28 +420,31 @@ app.post('/api/translate', async (req, res) => {
                 }
 
                 if (!req.file) {
-                    return res.status(400).json({ 
-                        error: 'No file provided',
-                        details: 'Please upload a valid image or JSON file'
-                    });
+                   return res.status(400).json({ 
+                       error: 'No file provided',
+                       details: 'Please upload a valid image or JSON file'
+                   });
                 }
 
                 const requestId = uuidv4();
-                const fileUrl = `/uploads/${req.file.filename}`;
-                const processingPath = path.join(config.processingDir, `${requestId}${path.extname(req.file.filename)}`);
-                
-                // Move file to processing directory
-                fs.renameSync(req.file.path, processingPath);
+                const fileExt = path.extname(req.file.originalname).toLowerCase() || 
+                               (req.file.mimetype === 'application/json' ? '.json' : '.jpg');
+                const newFilename = `${requestId}${fileExt}`;
+                const fileUrl = `/uploads/${newFilename}`;
+                const newPath = path.join(config.uploadDir, newFilename);
+
+                // Rename/move the file with the new filename
+                fs.renameSync(req.file.path, newPath);
 
                 requestStores.translation.set(requestId, {
-                    file_path: req.file.path,
-                    processing_path: processingPath,
-                    file_url: fileUrl,
-                    status: 'pending',
-                    result: null,
-                    timestamp: Date.now(),
-                    input_type: req.file.mimetype === 'application/json' ? 'json_file' : 'image_file',
-                    response: res // Store the response object
+                    file_path: newPath,  // Store the new path
+                   processing_path: null,
+                   file_url: fileUrl,
+                   status: 'pending',
+                  result: null,             
+                   timestamp: Date.now(),
+                   input_type: req.file.mimetype === 'application/json' ? 'json_file' : 'image_file',
+                    response: res
                 });
 
                 // Don't respond yet - we'll respond when processing is complete
@@ -575,6 +596,19 @@ app.get('/api/translate/result/:requestId', (req, res) => {
 setInterval(cleanupOldRequests, config.cleanupInterval);
 
 // Error handling middleware
+app.get('/api/verify-file/:filename', (req, res) => {
+    const filePath = path.join(config.uploadDir, req.params.filename);
+    if (fs.existsSync(filePath)) {
+        res.json({
+            exists: true,
+            size: fs.statSync(filePath).size,
+            url: `/uploads/${req.params.filename}`
+        });
+    } else {
+        res.status(404).json({ exists: false });
+    }
+});
+
 app.use((err, req, res, next) => {
     console.error('Unhandled error:', err);
     res.status(500).json({ 
@@ -599,4 +633,11 @@ app.listen(PORT, () => {
     console.log('- GET    /api/translate/pending');
     console.log('- POST   /api/translate/complete');
     console.log('- GET    /api/translate/result/:requestId');
+    fs.access(config.uploadDir, fs.constants.R_OK | fs.constants.W_OK, (err) => {
+    if (err) {
+        console.error(`Upload directory (${config.uploadDir}) access error:`, err);
+        process.exit(1);
+    }
+    console.log('Upload directory verified with read/write access');
+});
 });

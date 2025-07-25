@@ -35,7 +35,14 @@ std::string exec(const char* cmd) {
     
     try {
         while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-            result += buffer;
+            // Convert to UTF-8 or clean invalid characters
+            std::string temp(buffer);
+            for (char& c : temp) {
+                if (static_cast<unsigned char>(c) > 127) {
+                    c = '?'; // Replace non-ASCII with '?'
+                }
+            }
+            result += temp;
         }
     } catch (...) {
         _pclose(pipe);
@@ -111,19 +118,24 @@ int main() {
                                 std::remove(local_path.c_str());
 
                                 if (!output.empty()) {
-                                    json result_payload = {
-                                        {"request_id", request_id},
-                                        {"label", output}
-                                    };
-                                    
-                                    auto post_res = cli.Post(RESULT_ENDPOINT.c_str(), 
-                                        result_payload.dump(), "application/json");
-                                    
-                                    if (post_res && post_res->status == 200) {
-                                        std::cout << "Result sent successfully." << std::endl;
-                                    } else {
-                                        std::cerr << "Failed to send result." << std::endl;
-                                    }
+                                 try {
+                                     json result_payload = {
+                                     {"request_id", request_id},
+                                     {"label", output}
+                                 };
+                                 
+                                     auto post_res = cli.Post(RESULT_ENDPOINT.c_str(), 
+                                     result_payload.dump(), "application/json");
+                                     
+                                     if (post_res && post_res->status == 200) {
+                                     std::cout << "Result sent successfully." << std::endl;
+                                 } else {
+                                         std::cerr << "Failed to send result." << std::endl;
+                                     }
+                                 } catch (const json::exception& e) {
+                                     std::cerr << "JSON creation error: " << e.what() << std::endl;
+                                      std::cerr << "Problematic output was: " << output << std::endl;
+                                  }
                                 }
                             } else {
                                 std::cerr << "Failed to download image after " << MAX_RETRIES << " attempts." << std::endl;

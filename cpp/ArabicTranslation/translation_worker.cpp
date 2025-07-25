@@ -32,31 +32,62 @@ httplib::Headers GetDefaultHeaders() {
 }
 
 bool DownloadFile(const std::string& url, const std::string& outputPath) {
-    httplib::SSLClient cli(SERVER_BASE_URL, SERVER_PORT); // Changed to SSLClient
+    httplib::SSLClient cli(SERVER_BASE_URL, SERVER_PORT);
     cli.enable_server_certificate_verification(false);
+    cli.set_connection_timeout(30);
+    cli.set_read_timeout(30);
     
-    std::string path = url.substr(url.find(SERVER_BASE_URL) + SERVER_BASE_URL.length());
-    if (path.empty()) path = "/";
+    // Get headers with potential authorization
+    auto headers = GetDefaultHeaders();
+    // If you need authentication, add it here:
+    // headers.emplace("Authorization", "Bearer YOUR_TOKEN");
     
-    auto res = cli.Get(path, GetDefaultHeaders());
-    
-    if (res && res->status == 200) {
-        std::ofstream ofs(outputPath, std::ios::binary);
-        if (!ofs) {
-            std::cerr << "Failed to create file: " << outputPath << std::endl;
-            return false;
-        }
-        ofs << res->body;
-        return true;
+    // Construct the full URL if it's not already complete
+    std::string fullUrl = url;
+    if (url.find("http") != 0 && url[0] == '/') {
+        fullUrl = "https://" + SERVER_BASE_URL + url;
     }
+    
+    // Extract just the path for the HTTP request
+    std::string path;
+    if (fullUrl.find("http") == 0) {
+        size_t base_pos = fullUrl.find(SERVER_BASE_URL);
+        if (base_pos != std::string::npos) {
+            path = fullUrl.substr(base_pos + SERVER_BASE_URL.length());
+        } else {
+            path = fullUrl.substr(fullUrl.find("/", 8)); // Skip http:// or https://
+        }
+    } else {
+        path = fullUrl;
+    }
+    
+    std::cout << "Attempting to download from: " << path << std::endl;
+    
+    auto res = cli.Get(path, headers);
+    
+    if (res) {
+        std::cout << "Download response status: " << res->status << std::endl;
+        if (res->status == 200) {
+            std::ofstream ofs(outputPath, std::ios::binary);
+            if (!ofs) {
+                std::cerr << "Failed to create file: " << outputPath << std::endl;
+                return false;
+            }
+            ofs << res->body;
+            return true;
+        }
+    }
+    
     std::cerr << "Download failed. Status: " << (res ? res->status : 0) 
               << ", Error: " << (res ? res->body : "No response") << std::endl;
     return false;
 }
 
 json HttpGetJson(const std::string& path) {
-    httplib::SSLClient cli(SERVER_BASE_URL, SERVER_PORT); // Changed to SSLClient
+    httplib::SSLClient cli(SERVER_BASE_URL, SERVER_PORT);
     cli.enable_server_certificate_verification(false);
+    cli.set_connection_timeout(30);
+    cli.set_read_timeout(30);
     
     std::cout << "GET Request to: " << path << std::endl;
     
@@ -64,8 +95,6 @@ json HttpGetJson(const std::string& path) {
     
     if (res) {
         std::cout << "Response status: " << res->status << std::endl;
-        std::cout << "Response body: " << res->body << std::endl;
-        
         if (res->status == 200) {
             try {
                 return json::parse(res->body);
@@ -73,8 +102,8 @@ json HttpGetJson(const std::string& path) {
                 std::cerr << "JSON parse error: " << e.what() << std::endl;
             }
         } else {
-            std::cerr << "Server returned error: " << res->status 
-                      << ", Message: " << res->body << std::endl;
+            std::cerr << "Server error - Status: " << res->status 
+                      << ", Body: " << res->body << std::endl;
         }
     } else {
         auto err = res.error();
@@ -160,6 +189,7 @@ void ProcessRequest(const json& request) {
         std::string inputType = request["input_type"];
         
         std::cout << "\nProcessing request ID: " << requestId << std::endl;
+        std::cout << "Input type: " << inputType << std::endl;
 
         if (!fs::exists(DOWNLOAD_DIR)) {
             fs::create_directory(DOWNLOAD_DIR);
@@ -170,55 +200,73 @@ void ProcessRequest(const json& request) {
             json textData;
             textData["arabic_text"] = request["arabic_text"].get<std::string>();
             std::ofstream(filePath) << textData.dump();
-            std::cout << "Created temporary file: " << filePath << std::endl;
-        } else {
-            std::string fileUrl = request["file_url"];
-            std::string ext = (inputType == "json_file") ? ".json" : ".jpg";
+        } 
+        else if (inputType == "json_file" || inputType == "image_file") {
+            std::string ext = (inputType == "json_file") ? ".json" : 
+                             (inputType == "image_file") ? ".png" : ".jpg";
             filePath = DOWNLOAD_DIR + "/" + requestId + ext;
             
-            if (!DownloadFile(fileUrl, filePath)) {
-                throw std::runtime_error("File download failed");
+            if (!request.contains("file_url") || request["file_url"].is_null()) {
+                throw std::runtime_error("No file_url provided for " + inputType + " request");
             }
-            std::cout << "Downloaded file to: " << filePath << std::endl;
+            
+            std::string fileUrl = request["file_url"];
+            std::cout << "File URL from server: " << fileUrl << std::endl;
+            
+            if (!DownloadFile(fileUrl, filePath)) {
+                throw std::runtime_error("Failed to download " + inputType + " file");
+            }
+        }
+        else {
+            throw std::runtime_error("Unknown input type: " + inputType);
         }
 
+        std::cout << "Input file: " << filePath << std::endl;
+        
+        // 1. Run Python script to process the file
         std::string pythonOutput = RunPythonScript(PYTHON_APP, filePath);
         
-        json result = json::parse(pythonOutput);
-        
-        if (result.contains("error") && !result["error"].get<std::string>().empty()) {
-            throw std::runtime_error("Translation error: " + result["error"].get<std::string>());
+        // 2. Parse the Python script output
+        json result;
+        try {
+            result = json::parse(pythonOutput);
+            
+            if (result.contains("error") && !result["error"].get<std::string>().empty()) {
+                throw std::runtime_error("Translation error: " + result["error"].get<std::string>());
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error parsing Python output: " << e.what() 
+                      << "\nRaw output: " << pythonOutput << std::endl;
+            throw;
         }
 
-        // Prepare and send results with proper encoding
-        json completeData;
-        completeData["request_id"] = requestId;
-        completeData["arabic_text"] = result["arabic_text"].get<std::string>();
-        completeData["english_translation"] = result["english_translation"].get<std::string>();
-        completeData["status"] = "completed";
+        // 3. Send results back to server
+        if (result.contains("english_translation")) {
+            json completeData = {
+                {"request_id", requestId},
+                {"arabic_text", result["arabic_text"].get<std::string>()},
+                {"english_translation", result["english_translation"].get<std::string>()},
+                {"status", "completed"}
+            };
 
-        if (!HttpPostJson("/api/translate/complete", completeData)) {
-            throw std::runtime_error("Failed to post completion");
+            if (!HttpPostJson("/api/translate/complete", completeData)) {
+                throw std::runtime_error("Failed to send completion to server");
+            }
+            std::cout << "Successfully processed and sent results for request: " << requestId << std::endl;
         }
-
-        std::cout << "Successfully completed request: " << requestId << std::endl;
         
     } catch (const std::exception& e) {
-        std::cerr << "Request processing error: " << e.what() << std::endl;
+        std::cerr << "Error: " << e.what() << std::endl;
         if (!filePath.empty() && fs::exists(filePath)) {
             fs::remove(filePath);
         }
         throw;
     }
-
+    
     // Clean up
     if (!filePath.empty() && fs::exists(filePath)) {
         fs::remove(filePath);
-        std::cout << "Cleaned up temporary file: " << filePath << std::endl;
     }
-
-    // Add a small delay between processing requests
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 }
 
 int main() {

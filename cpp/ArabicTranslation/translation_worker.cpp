@@ -15,7 +15,7 @@ namespace fs = std::filesystem;
 using json = nlohmann::json;
 
 // Configuration
-const std::string SERVER_HOST = "localhost"; // or your server address
+const std::string SERVER_HOST = "https://server2-production-3f9a.up.railway.app/"; // or your server address
 const int SERVER_PORT = 3000;
 const std::string DOWNLOAD_DIR = "downloads";
 const std::string PYTHON_APP = "pyApp\\translation.py";

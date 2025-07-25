@@ -127,19 +127,43 @@ app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
         const requestId = uuidv4();
         const imageUrl = `/uploads/${req.file.filename}`;
 
-        requestStores.place.set(requestId, {
-            image_path: req.file.path,
-            image_url: imageUrl,
-            status: 'processing',
-            label: null,
-            timestamp: Date.now()
+        // Create a promise that will resolve when processing is complete
+        const responsePromise = new Promise((resolve, reject) => {
+            requestStores.place.set(requestId, {
+                image_path: req.file.path,
+                image_url: imageUrl,
+                status: 'processing',
+                label: null,
+                timestamp: Date.now(),
+                resolve, // Store the resolve function
+                reject, // Store the reject function
+                timeout: setTimeout(() => {
+                    reject(new Error('Place recognition timeout'));
+                    // Cleanup if timeout occurs
+                    if (requestStores.place.get(requestId)) {
+                        requestStores.place.delete(requestId);
+                        try {
+                            if (fs.existsSync(req.file.path)) {
+                                fs.unlinkSync(req.file.path);
+                            }
+                        } catch (err) {
+                            console.error('Timeout cleanup error:', err);
+                        }
+                    }
+                }, config.requestTimeout)
+            });
         });
 
-        res.json({
-            status: 'processing',
-            request_id: requestId,
-            image_url: imageUrl
-        });
+        try {
+            // Wait for processing to complete or timeout
+            const result = await responsePromise;
+            res.json(result);
+        } catch (error) {
+            res.status(500).json({ 
+                error: 'Place recognition failed',
+                details: error.message 
+            });
+        }
 
     } catch (error) {
         console.error('Place recognition error:', error);
@@ -147,6 +171,44 @@ app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
             error: 'Internal server error',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
+    }
+});
+
+app.post('/api/recognize-place/result', express.json(), (req, res) => {
+    try {
+        const { request_id, label } = req.body;
+        
+        if (!request_id || !label || !requestStores.place.get(request_id)) {
+            return res.status(400).json({ error: 'Invalid request data' });
+        }
+
+        const request = requestStores.place.get(request_id);
+        
+        // Clear the timeout
+        if (request.timeout) {
+            clearTimeout(request.timeout);
+        }
+
+        // Prepare the result
+        const result = {
+            status: 'done',
+            request_id: request_id,
+            image_url: request.image_url,
+            label: label
+        };
+
+        // Resolve the promise if the resolve function exists
+        if (request.resolve) {
+            request.resolve(result);
+        }
+
+        // Cleanup
+        requestStores.place.delete(request_id);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Result update error:', error);
+        res.status(500).json({ error: 'Failed to update result' });
     }
 });
 
@@ -189,6 +251,7 @@ app.post('/api/recognize-place/result', express.json(), (req, res) => {
 });
 
 // ========== Price Check Endpoints ==========
+// ========== Price Check Endpoints ==========
 app.post('/api/check-price', upload.single('image'), async (req, res) => {
     try {
         if (!req.file) {
@@ -201,19 +264,43 @@ app.post('/api/check-price', upload.single('image'), async (req, res) => {
         const requestId = uuidv4();
         const imageUrl = `/uploads/${req.file.filename}`;
 
-        requestStores.price.set(requestId, {
-            image_path: req.file.path,
-            image_url: imageUrl,
-            status: 'processing',
-            result: null,
-            timestamp: Date.now()
+        // Create a promise that will resolve when processing is complete
+        const responsePromise = new Promise((resolve, reject) => {
+            requestStores.price.set(requestId, {
+                image_path: req.file.path,
+                image_url: imageUrl,
+                status: 'processing',
+                result: null,
+                timestamp: Date.now(),
+                resolve, // Store the resolve function
+                reject, // Store the reject function
+                timeout: setTimeout(() => {
+                    reject(new Error('Price check timeout'));
+                    // Cleanup if timeout occurs
+                    if (requestStores.price.get(requestId)) {
+                        requestStores.price.delete(requestId);
+                        try {
+                            if (fs.existsSync(req.file.path)) {
+                                fs.unlinkSync(req.file.path);
+                            }
+                        } catch (err) {
+                            console.error('Timeout cleanup error:', err);
+                        }
+                    }
+                }, config.requestTimeout)
+            });
         });
 
-        res.json({
-            status: 'processing',
-            request_id: requestId,
-            image_url: imageUrl
-        });
+        try {
+            // Wait for processing to complete or timeout
+            const result = await responsePromise;
+            res.json(result);
+        } catch (error) {
+            res.status(500).json({ 
+                error: 'Price check failed',
+                details: error.message 
+            });
+        }
 
     } catch (error) {
         console.error('Price check error:', error);
@@ -221,6 +308,44 @@ app.post('/api/check-price', upload.single('image'), async (req, res) => {
             error: 'Internal server error',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
+    }
+});
+
+app.post('/api/check-price/result', express.json(), (req, res) => {
+    try {
+        const { request_id, result } = req.body;
+        
+        if (!request_id || !result || !requestStores.price.get(request_id)) {
+            return res.status(400).json({ error: 'Invalid request data' });
+        }
+
+        const request = requestStores.price.get(request_id);
+        
+        // Clear the timeout
+        if (request.timeout) {
+            clearTimeout(request.timeout);
+        }
+
+        // Prepare the response
+        const response = {
+            status: 'done',
+            request_id: request_id,
+            image_url: request.image_url,
+            result: result
+        };
+
+        // Resolve the promise if the resolve function exists
+        if (request.resolve) {
+            request.resolve(response);
+        }
+
+        // Cleanup
+        requestStores.price.delete(request_id);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Result update error:', error);
+        res.status(500).json({ error: 'Failed to update result' });
     }
 });
 

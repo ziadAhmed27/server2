@@ -1,0 +1,127 @@
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.10.4
+** Copyright (c) 2022 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+
+C:\Program Files\Microsoft Visual Studio\2022\Community>cd C:\server2\cpp\ArabicTranslation
+
+C:\server2\cpp\ArabicTranslation>cl /EHsc /std:c++17 translation_worker.cpp ^
+More? /I . ^
+More? /I nlohmann ^
+More? /I "C:\Program Files\OpenSSL-Win64\include" ^
+More? /link ^
+More? /LIBPATH:"C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD" ^
+More? libssl.lib libcrypto.lib ws2_32.lib crypt32.lib ^
+More? /OUT:translation_worker.exe
+Microsoft (R) C/C++ Optimizing Compiler Version 19.40.33812 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+translation_worker.cpp
+Microsoft (R) Incremental Linker Version 14.40.33812.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+/out:translation_worker.exe
+"/LIBPATH:C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD"
+libssl.lib
+libcrypto.lib
+ws2_32.lib
+crypt32.lib
+/OUT:translation_worker.exe
+translation_worker.obj
+
+C:\server2\cpp\ArabicTranslation>cl /EHsc /std:c++17 translation_worker.cpp ^
+More? /I . ^
+More? /I nlohmann ^
+More? /I "C:\Program Files\OpenSSL-Win64\include" ^
+More? /link ^
+More? /LIBPATH:"C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD" ^
+More? libssl.lib libcrypto.lib ws2_32.lib crypt32.lib ^
+More? /OUT:translation_worker.exe
+Microsoft (R) C/C++ Optimizing Compiler Version 19.40.33812 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+translation_worker.cpp
+Microsoft (R) Incremental Linker Version 14.40.33812.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+/out:translation_worker.exe
+"/LIBPATH:C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD"
+libssl.lib
+libcrypto.lib
+ws2_32.lib
+crypt32.lib
+/OUT:translation_worker.exe
+translation_worker.obj
+
+C:\server2\cpp\ArabicTranslation>cl /EHsc /std:c++17 translation_worker.cpp ^
+More? /I . ^
+More? /I nlohmann ^
+More? /I "C:\Program Files\OpenSSL-Win64\include" ^
+More? /link ^
+More? /LIBPATH:"C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD" ^
+More? libssl.lib libcrypto.lib ws2_32.lib crypt32.lib ^
+More? /OUT:translation_worker.exe
+Microsoft (R) C/C++ Optimizing Compiler Version 19.40.33812 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+translation_worker.cpp
+translation_worker.cpp(263): error C2440: 'initializing': cannot convert from 'std::_Timeobj<char,const tm *>' to 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>'
+translation_worker.cpp(263): note: 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string': no overloaded function could convert all the argument types
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.40.33807\include\xstring(2559): note: could be 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string(const _Elem *const )'
+        with
+        [
+            _Elem=char
+        ]
+translation_worker.cpp(263): note: 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string(const _Elem *const )': cannot convert argument 1 from 'std::_Timeobj<char,const tm *>' to 'const _Elem *const '
+        with
+        [
+            _Elem=char
+        ]
+translation_worker.cpp(263): note: No user-defined-conversion operator available that can perform this conversion, or the operator cannot be called
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.40.33807\include\xstring(3137): note: or       'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string(std::initializer_list<_Elem>,const _Alloc &)'
+        with
+        [
+            _Elem=char,
+            _Alloc=std::allocator<char>
+        ]
+translation_worker.cpp(263): note: 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string(std::initializer_list<_Elem>,const _Alloc &)': cannot convert argument 1 from 'std::_Timeobj<char,const tm *>' to 'std::initializer_list<_Elem>'
+        with
+        [
+            _Elem=char,
+            _Alloc=std::allocator<char>
+        ]
+        and
+        [
+            _Elem=char
+        ]
+translation_worker.cpp(263): note: No user-defined-conversion operator available that can perform this conversion, or the operator cannot be called
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.40.33807\include\xstring(2948): note: or       'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string(const _Ty &,const unsigned __int64,const unsigned __int64,const _Alloc &)'
+        with
+        [
+            _Alloc=std::allocator<char>
+        ]
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.40.33807\include\xstring(2589): note: or       'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string(_Iter,_Iter,const _Alloc &)'
+        with
+        [
+            _Alloc=std::allocator<char>
+        ]
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.40.33807\include\xstring(2583): note: or       'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string(const unsigned __int64,const _Elem,const _Alloc &)'
+        with
+        [
+            _Elem=char,
+            _Alloc=std::allocator<char>
+        ]
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.40.33807\include\xstring(2566): note: or       'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string(const _Elem *const ,const _Alloc &)'
+        with
+        [
+            _Elem=char,
+            _Alloc=std::allocator<char>
+        ]
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.40.33807\include\xstring(2553): note: or       'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string(const _Elem *const ,const unsigned __int64,const _Alloc &)'
+        with
+        [
+            _Elem=char,
+            _Alloc=std::allocator<char>
+        ]
+translation_worker.cpp(263): note: while trying to match the argument list '(std::_Timeobj<char,const tm *>)'

@@ -10,21 +10,35 @@
 #include <direct.h>
 #include <Windows.h>
 #include <filesystem>
+#include <iomanip>
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
 // Configuration
-const std::string SERVER_HOST = "https://server2-production-3f9a.up.railway.app/"; // or your server address
-const int SERVER_PORT = 3000;
+const std::string SERVER_BASE_URL = "server2-production-3f9a.up.railway.app";
+const int SERVER_PORT = 443;
 const std::string DOWNLOAD_DIR = "downloads";
 const std::string PYTHON_APP = "pyApp\\translation.py";
-const int CHECK_INTERVAL = 3; // seconds
+const int CHECK_INTERVAL = 3;
 
-// Download a file from URL
+// Add headers to requests
+httplib::Headers GetDefaultHeaders() {
+    return {
+        {"Accept", "application/json"},
+        {"Content-Type", "application/json"},
+        {"User-Agent", "TranslationWorker/1.0"}
+    };
+}
+
 bool DownloadFile(const std::string& url, const std::string& outputPath) {
-    httplib::Client cli(SERVER_HOST, SERVER_PORT);
-    auto res = cli.Get(url);
+    httplib::SSLClient cli(SERVER_BASE_URL, SERVER_PORT); // Changed to SSLClient
+    cli.enable_server_certificate_verification(false);
+    
+    std::string path = url.substr(url.find(SERVER_BASE_URL) + SERVER_BASE_URL.length());
+    if (path.empty()) path = "/";
+    
+    auto res = cli.Get(path, GetDefaultHeaders());
     
     if (res && res->status == 200) {
         std::ofstream ofs(outputPath, std::ios::binary);
@@ -35,158 +49,243 @@ bool DownloadFile(const std::string& url, const std::string& outputPath) {
         ofs << res->body;
         return true;
     }
-    std::cerr << "Failed to download file. Status: " << (res ? res->status : 0) << std::endl;
+    std::cerr << "Download failed. Status: " << (res ? res->status : 0) 
+              << ", Error: " << (res ? res->body : "No response") << std::endl;
     return false;
 }
 
-// Make HTTP GET request
 json HttpGetJson(const std::string& path) {
-    httplib::Client cli(SERVER_HOST, SERVER_PORT);
-    auto res = cli.Get(path);
+    httplib::SSLClient cli(SERVER_BASE_URL, SERVER_PORT); // Changed to SSLClient
+    cli.enable_server_certificate_verification(false);
     
-    if (res && res->status == 200) {
-        try {
-            return json::parse(res->body);
-        } catch (const std::exception& e) {
-            std::cerr << "JSON parse error: " << e.what() << std::endl;
+    std::cout << "GET Request to: " << path << std::endl;
+    
+    auto res = cli.Get(path, GetDefaultHeaders());
+    
+    if (res) {
+        std::cout << "Response status: " << res->status << std::endl;
+        std::cout << "Response body: " << res->body << std::endl;
+        
+        if (res->status == 200) {
+            try {
+                return json::parse(res->body);
+            } catch (const std::exception& e) {
+                std::cerr << "JSON parse error: " << e.what() << std::endl;
+            }
+        } else {
+            std::cerr << "Server returned error: " << res->status 
+                      << ", Message: " << res->body << std::endl;
         }
     } else {
-        std::cerr << "HTTP GET failed. Status: " << (res ? res->status : 0) << std::endl;
+        auto err = res.error();
+        std::cerr << "HTTP error: " << httplib::to_string(err) << std::endl;
     }
     return nullptr;
 }
 
-// Make HTTP POST request with JSON
 bool HttpPostJson(const std::string& path, const json& data) {
-    httplib::Client cli(SERVER_HOST, SERVER_PORT);
-    auto res = cli.Post(path, data.dump(), "application/json");
+    httplib::SSLClient cli(SERVER_BASE_URL, SERVER_PORT);
+    cli.enable_server_certificate_verification(false);
     
-    if (res && res->status == 200) {
+    // Very short timeouts since we don't need the response
+    cli.set_connection_timeout(5);  // 5 seconds to connect
+    cli.set_write_timeout(5);       // 5 seconds to send data
+    cli.set_read_timeout(1);        // Minimal time to wait for response
+    
+    std::string requestBody = data.dump(-1, ' ', false, json::error_handler_t::replace);
+    std::cout << "POSTing data to: " << path << std::endl;
+    
+    auto res = cli.Post(path, GetDefaultHeaders(), requestBody, "application/json; charset=utf-8");
+    
+    // Consider the request successful if:
+    // 1. We got any response (even if we don't check it), OR
+    // 2. The data was definitely sent (even if we didn't get a response)
+    if (res || 
+        (res.error() == httplib::Error::Success) ||
+        (res.error() == httplib::Error::Read)) {
+        std::cout << "Request successfully sent to server" << std::endl;
         return true;
     }
-    std::cerr << "HTTP POST failed. Status: " << (res ? res->status : 0) << std::endl;
+    
+    std::cerr << "HTTP POST failed: " << httplib::to_string(res.error()) << std::endl;
     return false;
 }
 
-// Run Python script and get output
 std::string RunPythonScript(const std::string& scriptPath, const std::string& inputFile) {
-    std::string command = "python " + scriptPath + " \"" + inputFile + "\"";
+    // Get the full path to the Python script
+    fs::path fullScriptPath = fs::absolute(scriptPath);
+    
+    // Verify the Python script exists
+    if (!fs::exists(fullScriptPath)) {
+        std::cerr << "Error: Python script not found at " << fullScriptPath << std::endl;
+        return R"({"error": "Python script not found"})";
+    }
+
+    // Verify the input file exists
+    if (!fs::exists(inputFile)) {
+        std::cerr << "Error: Input file not found at " << inputFile << std::endl;
+        return R"({"error": "Input file not found"})";
+    }
+
+    std::string command = "py \"" + fullScriptPath.string() + "\" \"" + inputFile + "\"";
     std::array<char, 128> buffer;
     std::string result;
 
+    std::cout << "Executing: " << command << std::endl;
+
     FILE* pipe = _popen(command.c_str(), "r");
     if (!pipe) {
-        throw std::runtime_error("_popen() failed!");
+        std::cerr << "Error: Failed to execute Python script" << std::endl;
+        return R"({"error": "Failed to execute Python script"})";
     }
 
     while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
         result += buffer.data();
     }
 
-    _pclose(pipe);
+    int exitCode = _pclose(pipe);
+    if (exitCode != 0) {
+        std::cerr << "Python script exited with code: " << exitCode << std::endl;
+        return R"({"error": "Python script execution failed"})";
+    }
+
+    std::cout << "Python output: " << result << std::endl;
     return result;
 }
 
-// Process a translation request
 void ProcessRequest(const json& request) {
+    std::string filePath;
     try {
         std::string requestId = request["request_id"];
         std::string inputType = request["input_type"];
         
-        std::cout << "Processing request: " << requestId << std::endl;
+        std::cout << "\nProcessing request ID: " << requestId << std::endl;
 
-        // Create downloads directory if it doesn't exist
         if (!fs::exists(DOWNLOAD_DIR)) {
             fs::create_directory(DOWNLOAD_DIR);
         }
 
-        std::string filePath;
-        std::string arabicText;
-
         if (inputType == "raw_text") {
-            // For raw text requests, just use the text directly
-            arabicText = request["arabic_text"];
-            // Create a temporary JSON file
             filePath = DOWNLOAD_DIR + "/" + requestId + ".json";
-            json tempJson = {{"arabic_text", arabicText}};
-            std::ofstream(filePath) << tempJson.dump();
+            json textData;
+            textData["arabic_text"] = request["arabic_text"].get<std::string>();
+            std::ofstream(filePath) << textData.dump();
+            std::cout << "Created temporary file: " << filePath << std::endl;
         } else {
-            // For file requests, download the file
             std::string fileUrl = request["file_url"];
             std::string ext = (inputType == "json_file") ? ".json" : ".jpg";
             filePath = DOWNLOAD_DIR + "/" + requestId + ext;
             
             if (!DownloadFile(fileUrl, filePath)) {
-                std::cerr << "Failed to download file: " << fileUrl << std::endl;
-                return;
+                throw std::runtime_error("File download failed");
             }
+            std::cout << "Downloaded file to: " << filePath << std::endl;
         }
 
-        // Run Python translation
         std::string pythonOutput = RunPythonScript(PYTHON_APP, filePath);
         
-        // Parse Python output
-        json result;
-        try {
-            result = json::parse(pythonOutput);
-            if (result.contains("error") && !result["error"].empty()) {
-                std::cerr << "Python error: " << result["error"] << std::endl;
-                return;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "Error parsing Python output: " << e.what() << std::endl;
-            return;
+        json result = json::parse(pythonOutput);
+        
+        if (result.contains("error") && !result["error"].get<std::string>().empty()) {
+            throw std::runtime_error("Translation error: " + result["error"].get<std::string>());
         }
 
-        // Send result back to server
-        json completeData = {
-            {"request_id", requestId},
-            {"arabic_text", result.value("arabic_text", "")},
-            {"english_translation", result.value("english_translation", "")}
-        };
+        // Prepare and send results with proper encoding
+        json completeData;
+        completeData["request_id"] = requestId;
+        completeData["arabic_text"] = result["arabic_text"].get<std::string>();
+        completeData["english_translation"] = result["english_translation"].get<std::string>();
+        completeData["status"] = "completed";
 
         if (!HttpPostJson("/api/translate/complete", completeData)) {
-            std::cerr << "Failed to post completion for request: " << requestId << std::endl;
-        } else {
-            std::cout << "Successfully completed request: " << requestId << std::endl;
+            throw std::runtime_error("Failed to post completion");
         }
 
-        // Clean up downloaded file
-        if (fs::exists(filePath)) {
+        std::cout << "Successfully completed request: " << requestId << std::endl;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Request processing error: " << e.what() << std::endl;
+        if (!filePath.empty() && fs::exists(filePath)) {
             fs::remove(filePath);
         }
-    } catch (const std::exception& e) {
-        std::cerr << "Error processing request: " << e.what() << std::endl;
+        throw;
     }
+
+    // Clean up
+    if (!filePath.empty() && fs::exists(filePath)) {
+        fs::remove(filePath);
+        std::cout << "Cleaned up temporary file: " << filePath << std::endl;
+    }
+
+    // Add a small delay between processing requests
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 }
 
 int main() {
-    std::cout << "Translation Processor started. Checking for new requests every " 
-              << CHECK_INTERVAL << " seconds." << std::endl;
+    std::cout << "Starting Translation Processor (v1.7 - Robust Polling)" << std::endl;
+    std::cout << "Server: " << SERVER_BASE_URL << ":" << SERVER_PORT << std::endl;
+    std::cout << "Check interval: " << CHECK_INTERVAL << " seconds" << std::endl;
 
-    // Create downloads directory if it doesn't exist
     if (!fs::exists(DOWNLOAD_DIR)) {
         fs::create_directory(DOWNLOAD_DIR);
     }
 
+    int consecutive_errors = 0;
+    const int MAX_CONSECUTIVE_ERRORS = 5;
+
     while (true) {
         try {
-            // Check for pending translation requests
-            std::cout << "Checking for pending requests..." << std::endl;
+            auto cycle_start = std::chrono::steady_clock::now();
+            
+            // 1. Check for pending requests - with proper timestamp formatting
+            auto now = std::chrono::system_clock::now();
+            auto now_time = std::chrono::system_clock::to_time_t(now);
+            std::cout << "\n[" << std::put_time(std::localtime(&now_time), "%Y-%m-%d %H:%M:%S") 
+                      << "] Checking requests..." << std::endl;
+            
             json pendingRequests = HttpGetJson("/api/translate/pending");
             
-            if (pendingRequests.is_array() && !pendingRequests.empty()) {
-                for (const auto& req : pendingRequests) {
-                    ProcessRequest(req);
+            // 2. Process requests if available
+            if (pendingRequests.is_array()) {
+                if (!pendingRequests.empty()) {
+                    std::cout << "Found " << pendingRequests.size() << " request(s)" << std::endl;
+                    for (const auto& req : pendingRequests) {
+                        try {
+                            ProcessRequest(req);
+                            consecutive_errors = 0; // Reset error counter on success
+                        } catch (const std::exception& e) {
+                            std::cerr << "Error processing request: " << e.what() << std::endl;
+                            if (++consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
+                                throw std::runtime_error("Too many consecutive errors");
+                            }
+                        }
+                    }
+                } else {
+                    std::cout << "No pending requests" << std::endl;
                 }
-            } else if (!pendingRequests.is_null()) {
-                std::cout << "No pending requests found." << std::endl;
+            } else {
+                std::cerr << "Invalid response format from server" << std::endl;
+                if (++consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
+                    throw std::runtime_error("Too many consecutive errors");
+                }
             }
-        } catch (const std::exception& e) {
-            std::cerr << "Error in main loop: " << e.what() << std::endl;
-        }
 
-        std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL));
+            // 3. Maintain check interval
+            auto cycle_time = std::chrono::steady_clock::now() - cycle_start;
+            auto sleep_time = std::chrono::seconds(CHECK_INTERVAL) - cycle_time;
+            
+            if (sleep_time > std::chrono::seconds(0)) {
+                std::cout << "Waiting " 
+                          << std::chrono::duration_cast<std::chrono::milliseconds>(sleep_time).count() 
+                          << "ms until next check" << std::endl;
+                std::this_thread::sleep_for(sleep_time);
+            }
+            
+        } catch (const std::exception& e) {
+            std::cerr << "\n!!! MAIN LOOP ERROR: " << e.what() << std::endl;
+            std::cerr << "Restarting after " << CHECK_INTERVAL << " seconds...\n" << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL));
+        }
     }
 
     return 0;

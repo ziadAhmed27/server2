@@ -146,10 +146,14 @@ if __name__ == "__main__":
     try:
         result = main(sys.argv[1])
         print(result)
+        sys.stdout.flush()  # Ensure all output is flushed
     except Exception as e:
         print(json.dumps({
             "arabic_text": "",
             "english_translation": "",
             "error": f"Processing error: {str(e)}"
         }))
+        sys.stdout.flush()
         sys.exit(1)
+
+        # Add this at the end of your translation.py script

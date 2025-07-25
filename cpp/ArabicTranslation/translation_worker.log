@@ -1,0 +1,12 @@
+[2025-07-25 07:04:03] ======== Starting Translation Processor ========
+[2025-07-25 07:04:03] Checking requests...
+[2025-07-25 07:04:04] No pending requests
+[2025-07-25 07:04:04] Waiting 2376ms until next check
+[2025-07-25 07:04:06] Checking requests...
+[2025-07-25 07:04:06] No pending requests
+[2025-07-25 07:04:06] Waiting 2613ms until next check
+[2025-07-25 07:04:09] Checking requests...
+[2025-07-25 07:04:09] Found 1 request(s)
+[2025-07-25 07:04:09] Executing Python: py "C:\server2\cpp\ArabicTranslation\pyApp\translation.py" "downloads/d11701b7-153b-4a86-8788-e8399c25a864.json"
+[2025-07-25 07:04:13] Python output: {"arabic_text": "\u0627\u0644\u0633\u0644\u0627\u0645 \u0639\u0644\u064a\u0643\u0645", "english_translation": "Hello", "error": ""}
+

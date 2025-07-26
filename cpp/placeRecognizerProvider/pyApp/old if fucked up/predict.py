@@ -5,7 +5,6 @@ from PIL import Image
 import torchvision.transforms as transforms
 import open_clip
 import re
-import json
 
 # Set device
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -44,21 +43,9 @@ except Exception as e:
 # Split the file into blocks separated by blank lines
 label_blocks = content.strip().split("\n\n")
 
-# Extract label names and full descriptions
-label_data = []
-for block in label_blocks:
-    lines = block.splitlines()
-    if not lines:
-        continue
-    label_name = lines[0].strip()
-    description = ' '.join(line.strip() for line in lines[1:]) if len(lines) > 1 else ""
-    label_data.append({
-        "label": label_name,
-        "description": description
-    })
-
-# Use descriptions for matching
-descriptions = [item["description"] for item in label_data]
+# Use full descriptions for matching, but only output the label name (first line)
+descriptions = [block.strip() for block in label_blocks]
+label_names = [block.splitlines()[0].strip() for block in label_blocks]
 
 # Tokenize descriptions
 text_inputs = tokenizer(descriptions).to(device)
@@ -75,20 +62,11 @@ with torch.no_grad():
     # Compute similarity
     similarity = (image_features @ text_features.T).squeeze(0)
 
-# Get top match index and label data
+# Get top match index and label name
 top_index = similarity.argmax().item()
-result = label_data[top_index]
+predicted_label = label_names[top_index]
 
-# Clean the output text
-def clean_text(text):
-    text = text.replace('’', "'")  # Replace smart quote with ASCII apostrophe
-    text = re.sub(r'[^\x00-\x7F]', '', text)  # Remove any other non-ASCII chars
-    return text
-
-# Output result as JSON with label and description
-output = {
-    "label": clean_text(result["label"]),
-    "description": clean_text(result["description"])
-}
-
-print(json.dumps(output))
+# Output result (label only)
+cleaned_label = predicted_label.replace('’', "'")  # Replace smart quote with ASCII apostrophe
+cleaned_label = re.sub(r'[^\x00-\x7F]', '', cleaned_label)  # Remove any other non-ASCII chars
+print(cleaned_label)

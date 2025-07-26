@@ -175,7 +175,6 @@ app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
                 image_url: imageUrl,
                 status: 'processing',
                 label: null,
-                description: null, 
                 timestamp: Date.now(),
                 resolve, // Store the resolve function
                 reject, // Store the reject function
@@ -218,7 +217,7 @@ app.post('/api/recognize-place', upload.single('image'), async (req, res) => {
 
 app.post('/api/recognize-place/result', express.json(), (req, res) => {
     try {
-        const { request_id, label, description } = req.body;
+        const { request_id, label } = req.body;
         
         if (!request_id || !label || !requestStores.place.get(request_id)) {
             return res.status(400).json({ error: 'Invalid request data' });
@@ -231,13 +230,12 @@ app.post('/api/recognize-place/result', express.json(), (req, res) => {
             clearTimeout(request.timeout);
         }
 
-        // Prepare the result with description if provided
+        // Prepare the result
         const result = {
             status: 'done',
             request_id: request_id,
             image_url: request.image_url,
-            label: label,
-            ...(description && { description }) // Only include description if it exists
+            label: label
         };
 
         // Resolve the promise if the resolve function exists
@@ -274,7 +272,24 @@ app.get('/api/recognize-place/pending', (req, res) => {
     }
 });
 
+app.post('/api/recognize-place/result', express.json(), (req, res) => {
+    try {
+        const { request_id, label } = req.body;
+        
+        if (!request_id || !label || !requestStores.place.get(request_id)) {
+            return res.status(400).json({ error: 'Invalid request data' });
+        }
 
+        const request = requestStores.place.get(request_id);
+        request.status = 'done';
+        request.label = label;
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Result update error:', error);
+        res.status(500).json({ error: 'Failed to update result' });
+    }
+});
 
 // ========== Price Check Endpoints ==========
 // ========== Price Check Endpoints ==========

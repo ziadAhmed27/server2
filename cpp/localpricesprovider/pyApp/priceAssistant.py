@@ -119,9 +119,78 @@ def recognize_product(image_path):
     except Exception as e:
         return {"error": str(e)}
 
+def search_product_by_label(label):
+    try:
+        # Normalize the input label (case-insensitive)
+        normalized_input = label.lower().strip()
+
+        # Try to find exact match first (case-insensitive)
+        with open(PRICES_FILE, "r", encoding="utf-8") as f:
+            prices_ar = json.load(f)
+        
+        for product in prices_ar:
+            if product.lower() == normalized_input:
+                return {
+                    "found": True,
+                    "label": product,  # Return original case
+                    "min_price": prices_ar[product]["min"],
+                    "max_price": prices_ar[product]["max"]
+                }
+        
+        # Try English version (case-insensitive)
+        with open(PRICES_FILE_EN, "r", encoding="utf-8") as f:
+            prices_en = json.load(f)
+            
+        for product in prices_en:
+            if product.lower() == normalized_input:
+                return {
+                    "found": True,
+                    "label": product,  # Return original case
+                    "min_price": prices_en[product]["min"],
+                    "max_price": prices_en[product]["max"]
+                }
+        
+        # Try to find partial matches (case-insensitive)
+        partial_matches = []
+        for product in prices_ar:
+            if normalized_input in product.lower():
+                partial_matches.append({
+                    "label": product,
+                    "min_price": prices_ar[product]["min"],
+                    "max_price": prices_ar[product]["max"]
+                })
+        
+        if partial_matches:
+            return {
+                "found": True,
+                "partial_matches": partial_matches
+            }
+        
+        # If nothing found, try translating the input
+        try:
+            translated_label = GoogleTranslator(source='auto', target='ar').translate(label)
+            if translated_label in prices_ar:
+                return {
+                    "found": True,
+                    "label": translated_label,
+                    "min_price": prices_ar[translated_label]["min"],
+                    "max_price": prices_ar[translated_label]["max"]
+                }
+        except:
+            pass
+        
+        return {"found": False, "message": "Product not found in database"}
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+def is_image_file(filepath):
+    image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.gif']
+    return any(filepath.lower().endswith(ext) for ext in image_extensions)
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print(json.dumps({"error": "Usage: python priceAssistant.py <image_path>"}))
+        print(json.dumps({"error": "Usage: python priceAssistant.py <image_path_or_product_label>"}))
         sys.exit(1)
 
     try:
@@ -131,8 +200,15 @@ if __name__ == "__main__":
         if not os.path.exists(LABELS_FILE_EN) or not os.path.exists(PRICES_FILE_EN):
             translate_data()
 
-        # Process image
-        result = recognize_product(sys.argv[1])
-        print(json.dumps(result))
+        input_arg = sys.argv[1]
+        
+        if is_image_file(input_arg):
+            # Process as image
+            result = recognize_product(input_arg)
+        else:
+            # Process as product label
+            result = search_product_by_label(input_arg)
+            
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     except Exception as e:
         print(json.dumps({"error": f"Processing failed: {str(e)}"}))

@@ -118,25 +118,41 @@ int main() {
                                 std::remove(local_path.c_str());
 
                                 if (!output.empty()) {
-                                 try {
-                                     json result_payload = {
-                                     {"request_id", request_id},
-                                     {"label", output}
-                                 };
-                                 
-                                     auto post_res = cli.Post(RESULT_ENDPOINT.c_str(), 
-                                     result_payload.dump(), "application/json");
-                                     
-                                     if (post_res && post_res->status == 200) {
-                                     std::cout << "Result sent successfully." << std::endl;
-                                 } else {
-                                         std::cerr << "Failed to send result." << std::endl;
-                                     }
-                                 } catch (const json::exception& e) {
-                                     std::cerr << "JSON creation error: " << e.what() << std::endl;
-                                      std::cerr << "Problematic output was: " << output << std::endl;
-                                  }
-                                }
+    try {
+        // Parse the JSON output from Python
+        json python_output = json::parse(output);
+        
+        // Debug print to verify we're getting the description
+        std::cout << "Python output: " << python_output.dump() << std::endl;
+        
+        // Create result payload with separate keys
+        json result_payload = {
+            {"request_id", request_id},
+            {"label", python_output["label"]},
+            {"description", python_output["description"]},  // Make sure this line is present
+            {"status", "done"},
+            {"image_url", image_url}
+        };
+        
+        // Debug print to verify the final payload
+        std::cout << "Sending payload: " << result_payload.dump() << std::endl;
+        
+        auto post_res = cli.Post(RESULT_ENDPOINT.c_str(), 
+                               result_payload.dump(), "application/json");
+        
+        if (post_res && post_res->status == 200) {
+            std::cout << "Result sent successfully." << std::endl;
+        } else {
+            std::cerr << "Failed to send result." << std::endl;
+            if (post_res) {
+                std::cerr << "Server response: " << post_res->body << std::endl;
+            }
+        }
+    } catch (const json::exception& e) {
+        std::cerr << "JSON creation error: " << e.what() << std::endl;
+        std::cerr << "Problematic output was: " << output << std::endl;
+    }
+}
                             } else {
                                 std::cerr << "Failed to download image after " << MAX_RETRIES << " attempts." << std::endl;
                             }

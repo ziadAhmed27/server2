@@ -158,7 +158,7 @@ int main() {
                 std::cerr << "Failed to connect to server or bad response." << std::endl;
             }
 
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::seconds(5));
         }
     } catch (const std::exception& e) {
         std::cerr << "Exception: " << e.what() << std::endl;

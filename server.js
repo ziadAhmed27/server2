@@ -24,8 +24,8 @@ const config = {
 
 // Ensure directories exist
 [config.uploadDir, config.tempDir, config.processingDir].forEach(dir => {
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(config.uploadDir)) {
+    fs.mkdirSync(config.uploadDir, { recursive: true });
     }
 });
 
@@ -51,10 +51,6 @@ app.use('/uploads', (err, req, res, next) => {
     res.status(404).json({ error: 'File not found' });
 });
 
-app.use('/uploads', (err, req, res, next) => {
-    console.error('Static file error:', err);
-    res.status(404).json({ error: 'File not found' });
-});
 // Configure upload storage
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -297,7 +293,7 @@ app.post('/api/recognize-place/result', express.json(), (req, res) => {
 
 // ========== Price Check Endpoints ==========
 // ========== Price Check Endpoints ==========
-app.post('/api/check-price', upload.single('image'), async (req, res) => {
+app.post('/api/check-price-img', upload.single('image'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ 
@@ -356,41 +352,55 @@ app.post('/api/check-price', upload.single('image'), async (req, res) => {
     }
 });
 
-app.post('/api/check-price/result', express.json(), (req, res) => {
+app.post('/api/check-price-txt', express.json(), async (req, res) => {
     try {
-        const { request_id, result } = req.body;
+        const { label } = req.body;
         
-        if (!request_id || !result || !requestStores.price.get(request_id)) {
-            return res.status(400).json({ error: 'Invalid request data' });
+        if (!label) {
+            return res.status(400).json({ 
+                error: 'No label provided',
+                details: 'Please provide a label in the request body'
+            });
         }
 
-        const request = requestStores.price.get(request_id);
-        
-        // Clear the timeout
-        if (request.timeout) {
-            clearTimeout(request.timeout);
+        const requestId = uuidv4();
+
+        // Create a promise that will resolve when processing is complete
+        const responsePromise = new Promise((resolve, reject) => {
+            requestStores.price.set(requestId, {
+                label: label,
+                status: 'processing',
+                result: null,
+                timestamp: Date.now(),
+                resolve, // Store the resolve function
+                reject, // Store the reject function
+                timeout: setTimeout(() => {
+                    reject(new Error('Price check timeout'));
+                    // Cleanup if timeout occurs
+                    if (requestStores.price.get(requestId)) {
+                        requestStores.price.delete(requestId);
+                    }
+                }, config.requestTimeout)
+            });
+        });
+
+        try {
+            // Wait for processing to complete or timeout
+            const result = await responsePromise;
+            res.json(result);
+        } catch (error) {
+            res.status(500).json({ 
+                error: 'Price check failed',
+                details: error.message 
+            });
         }
 
-        // Prepare the response
-        const response = {
-            status: 'done',
-            request_id: request_id,
-            image_url: request.image_url,
-            result: result
-        };
-
-        // Resolve the promise if the resolve function exists
-        if (request.resolve) {
-            request.resolve(response);
-        }
-
-        // Cleanup
-        requestStores.price.delete(request_id);
-        
-        res.json({ success: true });
     } catch (error) {
-        console.error('Result update error:', error);
-        res.status(500).json({ error: 'Failed to update result' });
+        console.error('Price check error:', error);
+        res.status(500).json({ 
+            error: 'Internal server error',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 
@@ -402,7 +412,9 @@ app.get('/api/check-price/pending', (req, res) => {
                 pending.push({
                     request_id: id,
                     image_url: req.image_url,
-                    timestamp: req.timestamp
+                    label: req.label,
+                    timestamp: req.timestamp,
+                    type: req.image_url ? 'image' : 'text'
                 });
             }
         });
@@ -422,8 +434,31 @@ app.post('/api/check-price/result', express.json(), (req, res) => {
         }
 
         const request = requestStores.price.get(request_id);
-        request.status = 'done';
-        request.result = result;
+        
+        // Clear the timeout
+        if (request.timeout) {
+            clearTimeout(request.timeout);
+        }
+
+        // Prepare the response based on input type
+        const response = {
+            status: 'done',
+            request_id: request_id,
+            result: result
+        };
+
+        // Add image_url if this was an image request
+        if (request.image_url) {
+            response.image_url = request.image_url;
+        }
+
+        // Resolve the promise if the resolve function exists
+        if (request.resolve) {
+            request.resolve(response);
+        }
+
+        // Cleanup
+        requestStores.price.delete(request_id);
         
         res.json({ success: true });
     } catch (error) {
@@ -431,6 +466,7 @@ app.post('/api/check-price/result', express.json(), (req, res) => {
         res.status(500).json({ error: 'Failed to update result' });
     }
 });
+
 
 // ========== Translation Endpoints ==========
 app.post('/api/translate', async (req, res) => {
@@ -634,6 +670,25 @@ app.get('/api/verify-file/:filename', (req, res) => {
     } else {
         res.status(404).json({ exists: false });
     }
+});
+app.get('/api/verify-upload/:filename', (req, res) => {
+  const filePath = path.join(config.uploadDir, req.params.filename);
+  
+  fs.access(filePath, fs.constants.F_OK, (err) => {
+    if (err) {
+      console.error('File access error:', err);
+      return res.status(404).json({ 
+        exists: false,
+        path: filePath,
+        error: err.message
+      });
+    }
+    res.json({ 
+      exists: true,
+      path: filePath,
+      size: fs.statSync(filePath).size
+    });
+  });
 });
 
 app.use((err, req, res, next) => {

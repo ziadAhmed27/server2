@@ -468,15 +468,16 @@ app.post('/api/translate', async (req, res) => {
                 }
 
                 if (!req.file) {
-                   return res.status(400).json({ 
-                       error: 'No file provided',
-                       details: 'Please upload a valid image or JSON file'
-                   });
+                    return res.status(400).json({ 
+                        error: 'No file provided',
+                        details: 'Please upload a valid image or JSON file'
+                    });
                 }
 
                 const requestId = uuidv4();
                 const fileExt = path.extname(req.file.originalname).toLowerCase() || 
-                               (req.file.mimetype === 'application/json' ? '.json' : '.jpg');
+                               (req.file.mimetype === 'application/json' ? '.json' : 
+                               (req.file.mimetype.startsWith('image/') ? path.extname(req.file.originalname) || '.jpg' : '.jpg'));
                 const newFilename = `${requestId}${fileExt}`;
                 const fileUrl = `/uploads/${newFilename}`;
                 const newPath = path.join(config.uploadDir, newFilename);
@@ -484,14 +485,28 @@ app.post('/api/translate', async (req, res) => {
                 // Rename/move the file with the new filename
                 fs.renameSync(req.file.path, newPath);
 
+                // Determine input type based on file type
+                let inputType;
+                if (req.file.mimetype === 'application/json') {
+                    inputType = 'json_file';
+                } else if (req.file.mimetype.startsWith('image/')) {
+                    inputType = 'image_file';
+                } else {
+                    // This shouldn't happen because of our fileFilter
+                    return res.status(400).json({ 
+                        error: 'Invalid file type',
+                        details: 'Only JSON and image files are supported'
+                    });
+                }
+
                 requestStores.translation.set(requestId, {
-                    file_path: newPath,  // Store the new path
-                   processing_path: null,
-                   file_url: fileUrl,
-                   status: 'pending',
-                  result: null,             
-                   timestamp: Date.now(),
-                   input_type: req.file.mimetype === 'application/json' ? 'json_file' : 'image_file',
+                    file_path: newPath,
+                    processing_path: null,
+                    file_url: fileUrl,
+                    status: 'pending',
+                    result: null,             
+                    timestamp: Date.now(),
+                    input_type: inputType,
                     response: res
                 });
 

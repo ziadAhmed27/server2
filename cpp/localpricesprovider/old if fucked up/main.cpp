@@ -85,69 +85,53 @@ int main() {
                     } else {
                         for (const auto& task : pending_tasks) {
                             std::string request_id = task["request_id"];
-                            std::string task_type = task.value("type", "image"); // Default to image for backward compatibility
-                            std::string command;
+                            std::string image_url = task["image_url"];
+                            std::string filename = image_url.substr(image_url.find_last_of("/") + 1);
+                            std::string local_path = downloadsPath + "\\" + filename;
 
-                            if (task_type == "image") {
-                                std::string image_url = task["image_url"];
-                                std::string filename = image_url.substr(image_url.find_last_of("/") + 1);
-                                std::string local_path = downloadsPath + "\\" + filename;
+                            std::cout << "Processing task " << request_id << "..." << std::endl;
 
-                                std::cout << "Processing image task " << request_id << "..." << std::endl;
-
-                                // Download with retries
-                                bool downloaded = false;
-                                for (int i = 0; i < MAX_RETRIES && !downloaded; i++) {
-                                    downloaded = download_file(cli, SERVER_BASE_URL + image_url, local_path);
-                                    if (!downloaded) {
-                                        std::this_thread::sleep_for(std::chrono::seconds(1));
-                                    }
-                                }
-
+                            // Download with retries
+                            bool downloaded = false;
+                            for (int i = 0; i < MAX_RETRIES && !downloaded; i++) {
+                                downloaded = download_file(cli, SERVER_BASE_URL + image_url, local_path);
                                 if (!downloaded) {
-                                    std::cerr << "Failed to download image after " << MAX_RETRIES << " attempts." << std::endl;
-                                    continue;
+                                    std::this_thread::sleep_for(std::chrono::seconds(1));
                                 }
-
-                                command = "py \"" + pythonScriptPath + "\" \"" + local_path + "\"";
-                            } 
-                            else if (task_type == "text") {
-                                std::string label = task["label"];
-                                std::cout << "Processing text task " << request_id << "..." << std::endl;
-                                command = "py \"" + pythonScriptPath + "\" \"" + label + "\"";
                             }
 
-                            std::cout << "Executing: " << command << std::endl;
-                            std::string output = exec(command.c_str());
+                            if (downloaded) {
+                                std::string command = "py \"" + pythonScriptPath + "\" \"" + local_path + "\"";
+                                std::cout << "Executing: " << command << std::endl;
+                                std::string output = exec(command.c_str());
 
-                            // Clean up downloaded file if this was an image task
-                            if (task_type == "image") {
-                                std::string local_path = downloadsPath + "\\" + 
-                                    task["image_url"].get<std::string>().substr(task["image_url"].get<std::string>().find_last_of("/") + 1);
+                                // Clean up
                                 std::remove(local_path.c_str());
-                            }
 
-                            if (!output.empty()) {
-                                try {
-                                    json result = json::parse(output);
-                                    
-                                    json result_payload = {
-                                        {"request_id", request_id},
-                                        {"result", result}
-                                    };
-                                    
-                                    auto post_res = cli.Post(RESULT_ENDPOINT.c_str(), 
-                                        result_payload.dump(), "application/json");
-                                    
-                                    if (post_res && post_res->status == 200) {
-                                        std::cout << "Result sent successfully." << std::endl;
-                                    } else {
-                                        std::cerr << "Failed to send result." << std::endl;
+                                if (!output.empty()) {
+                                    try {
+                                        json result = json::parse(output);
+                                        
+                                        json result_payload = {
+                                            {"request_id", request_id},
+                                            {"result", result}
+                                        };
+                                        
+                                        auto post_res = cli.Post(RESULT_ENDPOINT.c_str(), 
+                                            result_payload.dump(), "application/json");
+                                        
+                                        if (post_res && post_res->status == 200) {
+                                            std::cout << "Result sent successfully." << std::endl;
+                                        } else {
+                                            std::cerr << "Failed to send result." << std::endl;
+                                        }
+                                    } catch (const json::parse_error& e) {
+                                        std::cerr << "JSON parse error: " << e.what() << std::endl;
+                                        std::cerr << "Raw output: " << output << std::endl;
                                     }
-                                } catch (const json::parse_error& e) {
-                                    std::cerr << "JSON parse error: " << e.what() << std::endl;
-                                    std::cerr << "Raw output: " << output << std::endl;
                                 }
+                            } else {
+                                std::cerr << "Failed to download image after " << MAX_RETRIES << " attempts." << std::endl;
                             }
                         }
                     }

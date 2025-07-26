@@ -84,11 +84,16 @@ const fileFilter = (req, file, cb) => {
   // Also check the extension as fallback
   const ext = path.extname(file.originalname).toLowerCase();
   const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.json'];
-  
+
   if (allowedTypes.includes(file.mimetype) || allowedExtensions.includes(ext)) {
     cb(null, true);
   } else {
-    cb(new Error(`Invalid file type. Only ${allowedTypes.join(', ')} are allowed`), false);
+    console.log('Rejected file:', {
+      name: file.originalname,
+      mimetype: file.mimetype,
+      extension: ext
+    });
+    cb(new Error(`Invalid file type. Allowed types: ${allowedTypes.join(', ')}`), false);
   }
 };
 

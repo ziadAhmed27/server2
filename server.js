@@ -106,7 +106,8 @@ const upload = multer({
 const requestStores = {
     place: new Map(),
     price: new Map(),
-    translation: new Map()
+    translation: new Map(),
+    ai: new Map()
 };
 
 // Helper functions
@@ -133,6 +134,7 @@ const cleanupOldRequests = () => {
     cleanup(requestStores.place);
     cleanup(requestStores.price);
     cleanup(requestStores.translation);
+    cleanup(requestStores.ai);
 
     // Cleanup old files in all directories
     [config.uploadDir, config.tempDir, config.processingDir].forEach(dir => {
@@ -655,6 +657,98 @@ app.get('/api/translate/result/:requestId', (req, res) => {
     }
 });
 
+// ========== AI Request Endpoints ==========
+// Create AI request (text only: speech)
+app.post('/api/ai_req', express.json(), async (req, res) => {
+    try {
+        const { speech } = req.body || {};
+        if (!speech || typeof speech !== 'string' || !speech.trim()) {
+            return res.status(400).json({
+                error: 'No speech provided',
+                details: 'Provide JSON body { "speech": "text" }'
+            });
+        }
+
+        const requestId = uuidv4();
+        requestStores.ai.set(requestId, {
+            status: 'processing',
+            timestamp: Date.now(),
+            speech: speech.trim(),
+            // Promise-like resolution pattern consistent with place/price
+            resolve: null,
+            reject: null,
+            timeout: null
+        });
+
+        // Create a promise and store its resolvers for the result endpoint
+        const responsePromise = new Promise((resolve, reject) => {
+            const r = requestStores.ai.get(requestId);
+            if (!r) return reject(new Error('AI request store failure'));
+            r.resolve = resolve;
+            r.reject = reject;
+            r.timeout = setTimeout(() => {
+                reject(new Error('AI request timeout'));
+                // Cleanup
+                if (requestStores.ai.get(requestId)) {
+                    requestStores.ai.delete(requestId);
+                }
+            }, config.requestTimeout);
+        });
+
+        try {
+            const result = await responsePromise;
+            res.json(result);
+        } catch (e) {
+            res.status(500).json({ error: 'AI processing failed', details: e.message });
+        }
+    } catch (error) {
+        console.error('AI request error:', error);
+        res.status(500).json({ error: 'Internal server error', details: process.env.NODE_ENV === 'development' ? error.message : undefined });
+    }
+});
+
+// Get pending AI requests for the worker
+app.get('/api/ai_req/pending', (req, res) => {
+    try {
+        const pending = [];
+        requestStores.ai.forEach((val, id) => {
+            if (val.status === 'processing') {
+                pending.push({ request_id: id, speech: val.speech, timestamp: val.timestamp });
+            }
+        });
+        res.json(pending);
+    } catch (error) {
+        console.error('AI pending error:', error);
+        res.status(500).json({ error: 'Failed to get pending AI requests' });
+    }
+});
+
+// Worker posts result when done
+app.post('/api/ai_req/result', express.json(), (req, res) => {
+    try {
+        const { request_id, mode, status } = req.body || {};
+        if (!request_id || !requestStores.ai.get(request_id)) {
+            return res.status(400).json({ error: 'Invalid request data' });
+        }
+
+        const request = requestStores.ai.get(request_id);
+        if (request.timeout) clearTimeout(request.timeout);
+
+        const result = {
+            mode: mode || 'Unknown Mode',
+            request_id: request_id,
+            status: status || 'not confident'
+        };
+
+        if (request.resolve) request.resolve(result);
+        requestStores.ai.delete(request_id);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('AI result error:', error);
+        res.status(500).json({ error: 'Failed to update AI result' });
+    }
+});
+
 // Cleanup old requests
 setInterval(cleanupOldRequests, config.cleanupInterval);
 
@@ -718,6 +812,9 @@ app.listen(PORT, () => {
     console.log('- GET    /api/translate/pending');
     console.log('- POST   /api/translate/complete');
     console.log('- GET    /api/translate/result/:requestId');
+    console.log('- POST   /api/ai_req');
+    console.log('- GET    /api/ai_req/pending');
+    console.log('- POST   /api/ai_req/result');
     fs.access(config.uploadDir, fs.constants.R_OK | fs.constants.W_OK, (err) => {
     if (err) {
         console.error(`Upload directory (${config.uploadDir}) access error:`, err);

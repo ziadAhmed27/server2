@@ -13,7 +13,7 @@
 using json = nlohmann::json;
 
 // Configuration
-const std::string SERVER_BASE_URL = "https://server2-production-3f9a.up.railway.app"; // Update with your server URL
+const std::string SERVER_BASE_URL = "https://server2-production-3173.up.railway.app"; // Update with your server URL
 const std::string PENDING_ENDPOINT = "/api/check-price/pending";
 const std::string RESULT_ENDPOINT = "/api/check-price/result";
 const std::string DOWNLOADS_DIR = "downloads";

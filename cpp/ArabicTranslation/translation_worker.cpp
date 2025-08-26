@@ -16,7 +16,7 @@ namespace fs = std::filesystem;
 using json = nlohmann::json;
 
 // Configuration
-const std::string SERVER_BASE_URL = "server2-production-3f9a.up.railway.app";
+const std::string SERVER_BASE_URL = "server2-production-3173.up.railway.app";
 const int SERVER_PORT = 443;
 const std::string DOWNLOAD_DIR = "downloads";
 const std::string PYTHON_APP = "pyApp\\translation.py";

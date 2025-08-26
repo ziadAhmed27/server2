@@ -24,3 +24,5 @@ Thumbs.db
 
 # Environment files
 .env 
+# Ignore C++ build artifacts and the whole folder
+cpp/

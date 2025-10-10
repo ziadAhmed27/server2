@@ -9,9 +9,9 @@ yarn-error.log*
 # Server recordings and uploads
 recordings/
 uploads/
-'server working old if fucked up'
+server_working_old_if_fucked_up/
 public/
-cpp/placeRecognizerProvider\old if fucked up/
+cpp/localpricesprovider/old_if_fucked_up/
 # Flutter app files
 rtsp_forwarder/
 flutter_rtsp_forwarder.dart
